@@ -1,0 +1,193 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 17 17% 7%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 199 100% 50%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 199 100% 50%;
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  }
+
+  #root {
+    width: 100vw;
+    height: 100vh;
+    margin: 0;
+    padding: 0;
+  }
+}
+
+/* Custom styles for device rendering */
+.device-casing {
+  background-color: #282828;
+  /* Subtle dot pattern texture */
+  background-image: radial-gradient(#1a1a1a 15%, transparent 16%);
+  background-size: 4px 4px;
+  box-shadow:
+    0 30px 60px -10px rgba(0, 0, 0, 0.8),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 0 20px rgba(0, 0, 0, 0.5);
+}
+
+/* Buttons */
+.tactile-btn {
+  background: linear-gradient(145deg, #2a2a2a, #222);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.05),
+    0 2px 4px rgba(0, 0, 0, 0.4);
+  border: 1px solid #1f1f1f;
+}
+
+.tactile-btn::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 40%;
+  height: 40%;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+  opacity: 0.6;
+}
+
+.tactile-btn:active {
+  transform: scale(0.95);
+}
+
+/* Roller Wheel with Ridges */
+.roller-wheel {
+  background:
+    repeating-linear-gradient(to bottom,
+      rgba(0, 0, 0, 0.3) 0px,
+      rgba(0, 0, 0, 0.3) 1px,
+      transparent 1px,
+      transparent 3px),
+    linear-gradient(to bottom, #2d2d2d 0%, #3a3a3a 50%, #2d2d2d 100%);
+  box-shadow: inset 0 0 3px rgba(0, 0, 0, 0.5);
+  border-left: 1px solid #1a1a1a;
+  border-right: 1px solid #1a1a1a;
+}
+
+.main-dial {
+  background: radial-gradient(circle at 30% 30%, #3e3e3e, #252525);
+  box-shadow:
+    0 10px 20px rgba(0, 0, 0, 0.6),
+    0 4px 0 #1a1a1a;
+}
+
+.led-green {
+  background-color: #4ade80;
+  box-shadow: 0 0 6px #4ade80;
+}
+
+/* Keypad Specifics */
+.keypad-btn {
+  background: linear-gradient(180deg, #1a1a1a 0%, #000 100%);
+  border: 1px solid #333;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    0 4px 0 #111,
+    0 6px 5px rgba(0, 0, 0, 0.3);
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.keypad-btn:active {
+  transform: translateY(4px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 0 #111;
+}
+
+.arrow-btn {
+  background: #333;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 2px 0 #151515;
+}
+
+.cable {
+  position: absolute;
+  top: -70px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 8px;
+  height: 70px;
+  background: linear-gradient(90deg, 
+    #1a1a1a 0%, 
+    #2d2d2d 25%, 
+    #363636 50%, 
+    #2d2d2d 75%, 
+    #1a1a1a 100%
+  );
+  border-radius: 2px;
+  z-index: -1;
+  box-shadow: 
+    inset -1px 0 1px rgba(0, 0, 0, 0.5),
+    inset 1px 0 1px rgba(255, 255, 255, 0.1),
+    0 0 3px rgba(0, 0, 0, 0.3);
+}
+
+.cable::before {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 14px;
+  height: 8px;
+  background: linear-gradient(180deg, #1a1a1a 0%, #0d0d0d 100%);
+  border-radius: 3px 3px 2px 2px;
+  box-shadow: 
+    inset 0 1px 2px rgba(255, 255, 255, 0.1),
+    0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.cable::after {
+  content: '';
+  position: absolute;
+  bottom: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 10px;
+  height: 3px;
+  background: #0a0a0a;
+  border-radius: 1px;
+  box-shadow: inset 0 0 2px rgba(0, 0, 0, 0.8);
+}
+
+/* Simple dark background */
+.dark-bg {
+  background-color: #111111;
+}
