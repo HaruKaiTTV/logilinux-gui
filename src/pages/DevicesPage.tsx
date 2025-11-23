@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { motion, AnimatePresence } from "framer-motion";
 import { DeviceConfigPage } from "./DeviceConfigPage";
 
 interface DeviceInfo {
@@ -309,21 +310,45 @@ export function DevicesPage() {
   // If a device is selected, show config page (AFTER all hooks)
   if (selectedDevice) {
     return (
-      <DeviceConfigPage
-        deviceName={selectedDevice.name}
-        deviceType={selectedDevice.device_type}
-        onBack={() => setSelectedDevice(null)}
-      />
+      <AnimatePresence mode="wait">
+        <motion.div
+          key="config"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+        >
+          <DeviceConfigPage
+            deviceName={selectedDevice.name}
+            deviceType={selectedDevice.device_type}
+            onBack={() => setSelectedDevice(null)}
+          />
+        </motion.div>
+      </AnimatePresence>
     );
   }
 
   return (
-    <div className="dark-bg w-screen h-screen flex overflow-hidden text-white">
+    <AnimatePresence mode="wait">
+      <motion.div
+        key="devices"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.2 }}
+        className="dark-bg w-screen h-screen flex overflow-hidden text-white"
+      >
       {/* Main App Window */}
       <div className="w-full h-full bg-[#111111] flex flex-col relative overflow-hidden">
 
         {/* Header */}
-        <header className="h-20 flex items-center justify-between px-8 border-b border-white/5">
+        <motion.header
+          initial={{ y: -20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: -20, opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          className="h-20 flex items-center justify-between px-8 border-b border-white/5"
+        >
           <h1 className="text-2xl font-bold tracking-wide text-white">{greeting}</h1>
 
           <div className="flex items-center gap-6 text-xs font-bold text-gray-400 tracking-wider">
@@ -360,28 +385,40 @@ export function DevicesPage() {
               </svg>
             </button>
           </div>
-        </header>
+        </motion.header>
 
         {/* Content Area */}
         <main className="flex-1 flex items-center justify-center gap-16 pb-8">
           {devices.length === 0 ? (
-            <div className="text-center">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3 }}
+              className="text-center"
+            >
               <div className="text-gray-500 text-lg font-medium mb-2">No devices connected</div>
               <div className="text-gray-600 text-sm">Connect your MX Dialpad to get started</div>
-            </div>
+            </motion.div>
           ) : (
             <>
-              {devices.map((device) => (
-                <DeviceCard
+              {devices.map((device, index) => (
+                <motion.div
                   key={device.id}
-                  device={device}
-                  activeButtons={activeButtons}
-                  dialRotation={dialRotation}
-                  wheelRotation={wheelRotation}
-                  wheelOffset={wheelOffset}
-                  dialAngle={dialAngle}
-                  onClick={() => setSelectedDevice(device)}
-                />
+                  initial={{ opacity: 0, scale: 0.8, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                  transition={{ duration: 0.3, delay: index * 0.1 }}
+                >
+                  <DeviceCard
+                    device={device}
+                    activeButtons={activeButtons}
+                    dialRotation={dialRotation}
+                    wheelRotation={wheelRotation}
+                    wheelOffset={wheelOffset}
+                    dialAngle={dialAngle}
+                    onClick={() => setSelectedDevice(device)}
+                  />
+                </motion.div>
               ))}
             </>
           )}
@@ -400,7 +437,8 @@ export function DevicesPage() {
         <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-blue-600 rounded-full mix-blend-multiply filter blur-[128px] opacity-40 animate-pulse"></div>
         <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-teal-600 rounded-full mix-blend-multiply filter blur-[128px] opacity-40"></div>
       </div>
-    </div>
+      </motion.div>
+    </AnimatePresence>
   );
 }
 
@@ -418,7 +456,13 @@ function DeviceCard({ device, activeButtons, dialRotation, wheelRotation, wheelO
   const isDial = device.device_type === "DIALPAD";
 
   return (
-    <div className="flex flex-col items-center cursor-pointer transition-transform hover:scale-105" onClick={onClick}>
+    <motion.div
+      whileHover={{ scale: 1.05 }}
+      whileTap={{ scale: 0.98 }}
+      transition={{ duration: 0.2 }}
+      className="flex flex-col items-center cursor-pointer"
+      onClick={onClick}
+    >
       <div className="h-72 flex items-center justify-center">
         {isDial ? (
           <DialDevice activeButtons={activeButtons} dialRotation={dialRotation} wheelRotation={wheelRotation} wheelOffset={wheelOffset} dialAngle={dialAngle} />
@@ -441,7 +485,7 @@ function DeviceCard({ device, activeButtons, dialRotation, wheelRotation, wheelO
           <span className="text-[9px] tracking-wider uppercase">Connected</span>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }
 
