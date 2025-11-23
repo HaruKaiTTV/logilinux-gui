@@ -1,0 +1,6 @@
+{
+  "sdk_path": "/home/ron0/development/cpp-projects/logilinux-sdk",
+  "examples_path": "/home/ron0/development/cpp-projects/logilinux-sdk/examples",
+  "library_path": "/home/ron0/development/cpp-projects/logilinux-sdk/logilinux-driver/build/lib",
+  "venv_python": "./venv/bin/python"
+}

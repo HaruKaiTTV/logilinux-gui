@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { motion, AnimatePresence } from "framer-motion";
 import { DeviceConfigPage } from "./DeviceConfigPage";
+import { CustomActionsPage } from "./CustomActionsPage";
 import logiLogo from "../assets/logilogo.svg";
 
 interface DeviceInfo {
@@ -73,6 +74,7 @@ export function DevicesPage() {
   const [dialSensitivity, setDialSensitivity] = useState(1);
   const [selectedDevice, setSelectedDevice] = useState<DeviceInfo | null>(null);
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
+  const [showCustomActions, setShowCustomActions] = useState(false);
   const settingsDropdownRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dialSensitivityRef = useRef(dialSensitivity);
@@ -887,15 +889,17 @@ export function DevicesPage() {
           <img src={logiLogo} alt="LogiLinux" className="h-8" />
 
           <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-6">
-            {/* Active App Indicator */}
-            <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-400/10 border border-cyan-400/30">
-              <svg className="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/>
-              </svg>
-              <span className="text-sm font-bold text-cyan-400">{activeApp}</span>
-            </div>
-
             <div className="flex items-center gap-6 text-xs font-bold text-gray-400 tracking-wider">
+            <button 
+              onClick={() => setShowCustomActions(false)}
+              className={`transition-colors flex items-center gap-2 ${!showCustomActions ? 'text-white' : 'hover:text-white'}`}
+            >
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
+                <path d="M224,115.55V40a8,8,0,0,0-8-8H40a8,8,0,0,0-8,8v75.55a16,16,0,0,0,0,24.9V216a8,8,0,0,0,8,8H216a8,8,0,0,0,8-8V140.45A16,16,0,0,0,224,115.55ZM40,128a15.91,15.91,0,0,0,0-16ZM216,48V128a15.91,15.91,0,0,0,0,16V48Z"></path>
+              </svg>
+              ALL APPS
+            </button>
+
             <button className="hover:text-white transition-colors flex items-center gap-2">
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
                 <path d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z"></path>
@@ -903,7 +907,10 @@ export function DevicesPage() {
               ADD DEVICE
             </button>
 
-            <button className="hover:text-white transition-colors flex items-center gap-2">
+            <button 
+              onClick={() => setShowCustomActions(true)}
+              className={`transition-colors flex items-center gap-2 ${showCustomActions ? 'text-white' : 'hover:text-white'}`}
+            >
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
                 <path d="M224.83,114.78l-26.26-26.26a1.42,1.42,0,0,0-.1-.11l-18.31-18.3A44.07,44.07,0,0,0,118,32h-2a44.08,44.08,0,0,0-43.8,40H56a16,16,0,0,0-16,16v32a8,8,0,0,0,16,0V88h56v80H56v-8a8,8,0,0,0-16,0v8a16,16,0,0,0,16,16h16.2A44.08,44.08,0,0,0,116,224h2a44.07,44.07,0,0,0,62.16-38.11l18.31-18.31a1.42,1.42,0,0,0,.11-.1l26.26-26.26A16,16,0,0,0,224.83,114.78ZM116,208a28,28,0,0,1,0-56h2a28,28,0,0,1,19.6,8l-28.95,28.94A8,8,0,0,0,120,200a28.06,28.06,0,0,1-4,8Zm2-136a28.08,28.08,0,0,1,27.71,24H120a8,8,0,0,0,0,16h26.88A28.11,28.11,0,0,1,135.3,131.3L116,112.69V96h2a28,28,0,0,1,0,56h-2a28,28,0,0,1-2.31-.12L125.89,139.7a8,8,0,0,0-11.31,0l-13.89,13.89A43.83,43.83,0,0,0,116,208h2a27.87,27.87,0,0,1-19.6-8l28.95-28.94A8,8,0,0,0,136,160a28.06,28.06,0,0,1,4-8Zm82.41,52.68-21.65,21.65L159.88,127.46l21.65-21.65Z"></path>
               </svg>
@@ -984,44 +991,60 @@ export function DevicesPage() {
           </div>
         </motion.header>
 
-        {/* Content Area */}
-        <main className="flex-1 flex items-center justify-center gap-16 pb-8">
-          {devices.length === 0 ? (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3 }}
-              className="text-center"
-            >
-              <div className="text-gray-500 text-lg font-medium mb-2">No devices connected</div>
-              <div className="text-gray-600 text-sm">Connect your MX Dialpad to get started</div>
-            </motion.div>
-          ) : (
-            <>
-              {devices.map((device, index) => (
-                <motion.div
-                  key={device.id}
-                  initial={{ opacity: 0, scale: 0.8, y: 20 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.8 }}
-                  transition={{ duration: 0.3, delay: index * 0.1 }}
-                >
-                  <DeviceCard
-                    device={device}
-                    activeButtons={activeButtons}
-                    dialRotation={dialRotation}
-                    wheelRotation={wheelRotation}
-                    wheelOffset={wheelOffset}
-                    dialAngle={dialAngle}
-                    tileImageMappings={tileImageMappings}
-                    imageLibrary={imageLibrary}
-                    onClick={() => setSelectedDevice(device)}
-                  />
-                </motion.div>
-              ))}
-            </>
-          )}
-        </main>
+        {/* Content Area with Sliding Panels */}
+        <div className="flex-1 relative overflow-hidden">
+          {/* Main Content */}
+          <motion.main 
+            animate={{ x: showCustomActions ? '-100%' : '0%' }}
+            transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
+            className="absolute inset-0 flex items-center justify-center gap-16 pb-8"
+          >
+            {devices.length === 0 ? (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
+                className="text-center"
+              >
+                <div className="text-gray-500 text-lg font-medium mb-2">No devices connected</div>
+                <div className="text-gray-600 text-sm">Connect your MX Dialpad to get started</div>
+              </motion.div>
+            ) : (
+              <>
+                {devices.map((device, index) => (
+                  <motion.div
+                    key={device.id}
+                    initial={{ opacity: 0, scale: 0.8, y: 20 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.8 }}
+                    transition={{ duration: 0.3, delay: index * 0.1 }}
+                  >
+                    <DeviceCard
+                      device={device}
+                      activeButtons={activeButtons}
+                      dialRotation={dialRotation}
+                      wheelRotation={wheelRotation}
+                      wheelOffset={wheelOffset}
+                      dialAngle={dialAngle}
+                      tileImageMappings={tileImageMappings}
+                      imageLibrary={imageLibrary}
+                      onClick={() => setSelectedDevice(device)}
+                    />
+                  </motion.div>
+                ))}
+              </>
+            )}
+          </motion.main>
+
+          {/* Custom Actions Panel */}
+          <motion.div
+            animate={{ x: showCustomActions ? '0%' : '100%' }}
+            transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
+            className="absolute inset-0"
+          >
+            <CustomActionsPage onBack={() => setShowCustomActions(false)} />
+          </motion.div>
+        </div>
 
         {/* Bottom Beta Tag */}
         <div className="absolute bottom-0 w-full flex justify-center pointer-events-none">

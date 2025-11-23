@@ -38,6 +38,11 @@ node_modules/
 .pnp/
 .pnp.js
 
+# Python virtual environment
+venv/
+*.pyc
+__pycache__/
+
 # Lock files (optional - uncomment if you want to track them)
 # pnpm-lock.yaml
 # Cargo.lock (in library projects)

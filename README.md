@@ -85,6 +85,9 @@ cd logilinux-gui
 ```bash
 # Install frontend packages
 pnpm install
+
+# Set up Python environment for custom actions (plugins)
+./setup_python.sh
 ```
 
 The Rust/C++ dependencies will be automatically built on first run.

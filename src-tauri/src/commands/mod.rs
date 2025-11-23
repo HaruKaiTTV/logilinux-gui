@@ -4,4 +4,5 @@ pub mod display;
 pub mod events;
 pub mod file_ops;
 pub mod permissions;
+pub mod python_plugins;
 pub mod window;
