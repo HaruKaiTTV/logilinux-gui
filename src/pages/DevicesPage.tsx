@@ -15,10 +15,11 @@ interface DeviceInfo {
 }
 
 interface DeviceEvent {
-  type: "ButtonPress" | "ButtonRelease" | "Rotation";
+  type: "ButtonPress" | "ButtonRelease" | "Rotation" | "DeviceConnected" | "DeviceDisconnected";
   button_code?: number;
   delta?: number;
   rotation_type?: string;
+  device_path?: string;
 }
 
 interface Action {
@@ -639,8 +640,29 @@ export function DevicesPage() {
     };
   }, []);
 
-  const handleDeviceEvent = (event: DeviceEvent) => {
+  const handleDeviceEvent = async (event: DeviceEvent) => {
     console.log('🎮 Device event received:', event);
+    
+    // Handle device connection/disconnection
+    if (event.type === "DeviceConnected") {
+      console.log('🔌 Device connected, reloading mappings...');
+      console.log('📋 Current mappings before reload:', buttonMappingsRef.current);
+      // Reload device list and wait for it
+      await discoverDevices();
+      // Small delay to ensure state updates
+      await new Promise(resolve => setTimeout(resolve, 100));
+      // Now reload button mappings and images with updated device list
+      loadMappings();
+      loadImageData();
+      console.log('📋 Current mappings after reload:', buttonMappingsRef.current);
+      return;
+    }
+    
+    if (event.type === "DeviceDisconnected") {
+      console.log('🔌 Device disconnected');
+      await discoverDevices();
+      return;
+    }
     
     // Don't execute actions if we're in the config page (selectedDevice is set)
     // The config page has its own event listener

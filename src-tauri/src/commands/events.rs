@@ -43,6 +43,8 @@ pub async fn start_device_monitoring(app: AppHandle) -> Result<(), String> {
             );
 
             let mut device_types_to_monitor = std::collections::HashSet::new();
+            let mut currently_connected_keys = std::collections::HashSet::new();
+            
             for dev in &all_devices {
                 let device_key = format!("{}:{}", dev.vendor_id, dev.product_id);
                 log::debug!(
@@ -50,7 +52,23 @@ pub async fn start_device_monitoring(app: AppHandle) -> Result<(), String> {
                     device_key,
                     dev.device_type
                 );
-                device_types_to_monitor.insert((device_key, dev.device_type));
+                device_types_to_monitor.insert((device_key.clone(), dev.device_type));
+                currently_connected_keys.insert(device_key);
+            }
+
+            // Detect disconnected devices
+            let disconnected_devices: Vec<String> = monitored_device_keys
+                .difference(&currently_connected_keys)
+                .cloned()
+                .collect();
+            
+            for device_key in disconnected_devices {
+                log::info!("🔌 Device disconnected: {}", device_key);
+                monitored_device_keys.remove(&device_key);
+                // Emit disconnection event
+                let _ = app.emit("device-event", &DeviceEvent::DeviceDisconnected {
+                    device_path: device_key.clone(),
+                });
             }
 
             let mut new_devices_found = false;
