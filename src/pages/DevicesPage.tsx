@@ -82,6 +82,9 @@ export function DevicesPage() {
   const [tileImageMappings, setTileImageMappings] = useState<TileImageMapping>({});
   const [activeApp, setActiveApp] = useState("All Apps");
   const activeAppRef = useRef("All Apps");
+  const appSwitchDebounceRef = useRef<number | null>(null);
+  const blankImageCacheRef = useRef<string | null>(null);
+  const lastSyncedMappingsRef = useRef<string>("");  // Track last synced state as JSON string
 
   useEffect(() => {
     dialAngleRef.current = dialAngle;
@@ -124,13 +127,18 @@ export function DevicesPage() {
       }
     };
 
-    // Poll every 500ms
-    const interval = setInterval(pollActiveWindow, 500);
+    // Poll every 1000ms (1 second) - reduced from 500ms for better performance
+    const interval = setInterval(pollActiveWindow, 1000);
     return () => clearInterval(interval);
   }, [activeApp]);
 
   // Helper function to create a blank image
   const createBlankImage = (): string => {
+    // Return cached blank image if available
+    if (blankImageCacheRef.current) {
+      return blankImageCacheRef.current;
+    }
+    
     const canvas = document.createElement('canvas');
     canvas.width = 118;
     canvas.height = 118;
@@ -140,7 +148,11 @@ export function DevicesPage() {
 
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, 118, 118);
-    return canvas.toDataURL('image/jpeg', 0.85);
+    const blankImage = canvas.toDataURL('image/jpeg', 0.85);
+    
+    // Cache for future use
+    blankImageCacheRef.current = blankImage;
+    return blankImage;
   };
 
   // Helper function to convert image to keypad format
@@ -276,25 +288,54 @@ export function DevicesPage() {
 
   // Load button mappings from localStorage
   const loadMappings = () => {
-    const deviceTypes = ["DIALPAD", "CREATIVE_CONSOLE", "default"];
     const app = activeAppRef.current;
     // Load the active page for the current app
     const activePage = parseInt(localStorage.getItem(`active-page-${app}`) || "1", 10);
     
-    for (const deviceType of deviceTypes) {
+    console.log(`📥 Loading mappings for app: "${app}", page: ${activePage}`);
+    
+    // Determine device types to try based on connected devices
+    let deviceTypesToTry: string[] = [];
+    
+    // Check what devices are connected
+    const hasKeypad = devices.some(d => d.device_type === "CREATIVE_CONSOLE");
+    const hasDialpad = devices.some(d => d.device_type === "DIALPAD");
+    
+    // Prioritize the actually connected device type
+    if (hasKeypad) {
+      deviceTypesToTry.push("CREATIVE_CONSOLE");
+    }
+    if (hasDialpad) {
+      deviceTypesToTry.push("DIALPAD");
+    }
+    
+    // Add fallback device types
+    deviceTypesToTry.push("default");
+    
+    // Also try the other types if nothing found yet (for backwards compatibility)
+    if (!hasKeypad) deviceTypesToTry.push("CREATIVE_CONSOLE");
+    if (!hasDialpad) deviceTypesToTry.push("DIALPAD");
+    
+    console.log(`  🎯 Device types to try (in order):`, deviceTypesToTry);
+    
+    for (const deviceType of deviceTypesToTry) {
       // Try app-specific config first, then fall back to "All Apps"
       const storageKeys = [
         `button-mappings-${deviceType}-${app}-page-${activePage}`,
         `button-mappings-${deviceType}-All Apps-page-${activePage}`,
       ];
       
+      console.log(`  🔍 Trying device type: ${deviceType}`);
+      
       for (const storageKey of storageKeys) {
+        console.log(`    🔑 Checking key: ${storageKey}`);
         const saved = localStorage.getItem(storageKey);
         if (saved) {
           try {
             const parsed = JSON.parse(saved);
             buttonMappingsRef.current = parsed;
-            console.log(`📋 Loaded ${Object.keys(parsed).length} button mappings for ${app} - ${deviceType} page ${activePage}`);
+            console.log(`    ✅ Loaded ${Object.keys(parsed).length} button mappings from ${storageKey}`);
+            console.log(`    📋 Mappings:`, parsed);
             return;
           } catch (err) {
             console.error(`Failed to parse mappings for ${deviceType}:`, err);
@@ -303,6 +344,7 @@ export function DevicesPage() {
       }
     }
     console.log(`⚠️ No button mappings found for ${app} page ${activePage}`);
+    buttonMappingsRef.current = {};
   };
 
   // Load image library and mappings
@@ -449,10 +491,25 @@ export function DevicesPage() {
     loadImageData();
   }, [devices]);
 
-  // Reload mappings and images when active app changes
+  // Reload mappings and images when active app changes (with debouncing)
   useEffect(() => {
-    loadMappings();
-    loadImageData();
+    // Clear any pending reload
+    if (appSwitchDebounceRef.current) {
+      clearTimeout(appSwitchDebounceRef.current);
+    }
+    
+    // Debounce the reload to prevent rapid switches from causing multiple reloads
+    appSwitchDebounceRef.current = window.setTimeout(() => {
+      console.log(`🔄 App switched to: ${activeApp}`);
+      loadMappings();
+      loadImageData();
+    }, 300); // 300ms debounce
+    
+    return () => {
+      if (appSwitchDebounceRef.current) {
+        clearTimeout(appSwitchDebounceRef.current);
+      }
+    };
   }, [activeApp]);
 
   // Sync images to physical device when tileImageMappings or activeApp changes
@@ -462,17 +519,36 @@ export function DevicesPage() {
     if (!hasKeypad || selectedDevice) return; // Don't sync while in config page
     
     const syncImagesToDevice = async () => {
+      // Check if mappings actually changed
+      const currentMappings = JSON.stringify(tileImageMappings);
+      if (currentMappings === lastSyncedMappingsRef.current) {
+        console.log(`⏩ Skipping image sync - no changes detected`);
+        return;
+      }
+      
       console.log(`🔄 Syncing images to device for ${activeApp}`);
+      const previousMappings: TileImageMapping = lastSyncedMappingsRef.current 
+        ? JSON.parse(lastSyncedMappingsRef.current) 
+        : {};
       
       for (let i = 0; i < 9; i++) {
-        const mapping = tileImageMappings[i];
-        if (mapping) {
-          const image = imageLibrary.find(img => img.id === mapping.imageId);
+        const currentMapping = tileImageMappings[i];
+        const previousMapping = previousMappings[i];
+        
+        // Skip if this tile hasn't changed
+        if (JSON.stringify(currentMapping) === JSON.stringify(previousMapping)) {
+          continue;
+        }
+        
+        if (currentMapping) {
+          const image = imageLibrary.find(img => img.id === currentMapping.imageId);
           if (image) {
-            await sendImageToDevice(i, image, mapping.position);
+            console.log(`  📷 Updating tile ${i}`);
+            await sendImageToDevice(i, image, currentMapping.position);
           }
         } else {
           // No mapping - send blank image
+          console.log(`  ⬛ Clearing tile ${i}`);
           const blankBase64 = createBlankImage();
           if (blankBase64) {
             const blankImageObj: KeypadImage = {
@@ -487,6 +563,8 @@ export function DevicesPage() {
         }
       }
       
+      // Update last synced state
+      lastSyncedMappingsRef.current = currentMappings;
       console.log(`✓ Image sync complete for ${activeApp}`);
     };
     
@@ -496,9 +574,16 @@ export function DevicesPage() {
   // Reload mappings when returning from config page
   useEffect(() => {
     if (!selectedDevice) {
-      // Just came back from config page, reload mappings
+      // Just came back from config page, reload everything
+      // Note: This will trigger the activeApp effect to reload, so we just need
+      // to ensure state is fresh. Clear the debounce to make it happen immediately.
+      if (appSwitchDebounceRef.current) {
+        clearTimeout(appSwitchDebounceRef.current);
+      }
       loadMappings();
       loadImageData();
+      // Force image sync on next render by clearing the last synced state
+      lastSyncedMappingsRef.current = "";
     }
   }, [selectedDevice]);
 
@@ -508,11 +593,17 @@ export function DevicesPage() {
   }, [dialSensitivity]);
 
   useEffect(() => {
+    console.log('🚀 DevicesPage mounting - registering event listener');
+    
     // Set greeting based on time of day
     const hour = new Date().getHours();
     if (hour < 12) setGreeting("Good Morning");
     else if (hour < 18) setGreeting("Good Afternoon");
     else setGreeting("Good Evening");
+
+    // Initial load of mappings and images
+    loadMappings();
+    loadImageData();
 
     // Initial discovery
     discoverDevices();
@@ -531,15 +622,19 @@ export function DevicesPage() {
     });
 
     return () => {
+      console.log('🧹 DevicesPage unmounting - cleaning up event listener');
       clearInterval(interval);
       unlisten.then(fn => fn());
     };
   }, []);
 
   const handleDeviceEvent = (event: DeviceEvent) => {
+    console.log('🎮 Device event received:', event);
+    
     // Don't execute actions if we're in the config page (selectedDevice is set)
     // The config page has its own event listener
     if (selectedDeviceRef.current) {
+      console.log('⏸️  Ignoring event - in config page');
       return;
     }
 
@@ -547,8 +642,13 @@ export function DevicesPage() {
       setActiveButtons(prev => new Set(prev).add(event.button_code!));
       
       const action = buttonMappingsRef.current[event.button_code];
+      console.log(`🔍 Button ${event.button_code} pressed, action:`, action);
       if (action) {
+        console.log(`▶️  Executing action:`, action.name);
         executeAction(action, true); // true = press
+      } else {
+        console.log(`⚠️  No action mapped for button ${event.button_code}`);
+        console.log('📋 Current mappings:', buttonMappingsRef.current);
       }
     } else if (event.type === "ButtonRelease" && event.button_code !== undefined) {
       setActiveButtons(prev => {

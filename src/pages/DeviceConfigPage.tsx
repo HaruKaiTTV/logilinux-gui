@@ -299,11 +299,14 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
   // Note: imageLibrary intentionally NOT in deps - we only sync when mappings change
 
   useEffect(() => {
+    console.log('🚀 DeviceConfigPage: Registering event listener');
+    
     const unlisten = listen<DeviceEvent>("device-event", (event) => {
       handleDeviceEvent(event.payload);
     });
 
     return () => {
+      console.log('🧹 DeviceConfigPage: Cleaning up event listener');
       unlisten.then(fn => fn());
     };
   }, []);
