@@ -42,6 +42,21 @@ type ButtonMapping = {
   [key: number]: Action | null;
 };
 
+interface KeypadImage {
+  id: string;
+  name: string;
+  base64: string;
+  tiles: number[];
+  createdAt: number;
+}
+
+type TileImageMapping = {
+  [tileIndex: number]: {
+    imageId: string;
+    position?: { row: number; col: number; rows: number; cols: number };
+  };
+};
+
 const AVAILABLE_ACTIONS: Action[] = [
   { id: "mute", name: "Toggle Mute", description: "Mute/unmute audio", category: "MEDIA & VOLUME", icon: "🔇", command: "pactl set-sink-mute @DEFAULT_SINK@ toggle" },
   { id: "volume-control", name: "Volume Control", description: "Adjust volume with rotation", category: "MEDIA & VOLUME", icon: "🔊", command: "volume-control", rotationOnly: true },
@@ -92,6 +107,18 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
   const buttonMappingsRef = useRef<ButtonMapping>({});
   const dialAngleRef = useRef(0);
 
+  // Image state
+  const [imageLibrary, setImageLibrary] = useState<KeypadImage[]>([]);
+  const [tileImageMappings, setTileImageMappings] = useState<TileImageMapping>({});
+  const [selectedTiles, setSelectedTiles] = useState<number[]>([]);
+  const [imageMode, setImageMode] = useState<'single' | 'multi'>('single');
+  const [showImageManager, setShowImageManager] = useState(false);
+  const [showImagePicker, setShowImagePicker] = useState(false);
+  const [activeTab, setActiveTab] = useState<'actions' | 'images'>('actions');
+  const lastSyncedMappingsRef = useRef<string>('');
+  const isLoadingMappingsRef = useRef(false);
+  const isLoadingActionsRef = useRef(false);
+
   const isKeypad = deviceType === "CREATIVE_CONSOLE";
 
   useEffect(() => {
@@ -103,21 +130,138 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
   }, [buttonMappings]);
 
   useEffect(() => {
-    const saved = localStorage.getItem(`button-mappings-${deviceType}`);
+    isLoadingActionsRef.current = true;
+    const saved = localStorage.getItem(`button-mappings-${deviceType}-page-${activePage}`);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
         setButtonMappings(parsed);
       } catch (e) {
+        console.error('Failed to load button mappings:', e);
       }
+    } else {
+      setButtonMappings({});
     }
-  }, [deviceType]);
+    // Allow saving after state update completes
+    setTimeout(() => {
+      isLoadingActionsRef.current = false;
+    }, 0);
+  }, [deviceType, activePage]);
 
   useEffect(() => {
-    if (Object.keys(buttonMappings).length > 0) {
-      localStorage.setItem(`button-mappings-${deviceType}`, JSON.stringify(buttonMappings));
+    // Don't save while loading from localStorage
+    if (isLoadingActionsRef.current) {
+      return;
     }
-  }, [buttonMappings, deviceType]);
+    // Always save buttonMappings, even if empty (to persist clearing assignments)
+    localStorage.setItem(`button-mappings-${deviceType}-page-${activePage}`, JSON.stringify(buttonMappings));
+    console.log(`💾 Saved ${Object.keys(buttonMappings).length} button mappings for ${deviceType} page ${activePage}`);
+  }, [buttonMappings, deviceType, activePage]);
+
+  useEffect(() => {
+    localStorage.setItem("active-page", activePage.toString());
+    // Clear tile selection when page changes
+    setSelectedTiles([]);
+  }, [activePage]);
+
+  // Load image library from localStorage (shared across all pages)
+  useEffect(() => {
+    const savedLibrary = localStorage.getItem('keypad-images');
+    if (savedLibrary) {
+      try {
+        setImageLibrary(JSON.parse(savedLibrary));
+      } catch (e) {
+        console.error('Failed to load image library:', e);
+      }
+    }
+  }, []);
+
+  // Load tile-image mappings for current page
+  useEffect(() => {
+    isLoadingMappingsRef.current = true;
+    // Clear last synced state when page changes to force a fresh sync
+    lastSyncedMappingsRef.current = '';
+    
+    const savedMappings = localStorage.getItem(`keypad-tile-images-page-${activePage}`);
+    if (savedMappings) {
+      try {
+        setTileImageMappings(JSON.parse(savedMappings));
+      } catch (e) {
+        console.error('Failed to load tile-image mappings:', e);
+      }
+    } else {
+      setTileImageMappings({});
+    }
+    // Use setTimeout to ensure state update completes before allowing sync
+    setTimeout(() => {
+      isLoadingMappingsRef.current = false;
+    }, 0);
+  }, [activePage]);
+
+  // Save tile-image mappings for current page
+  useEffect(() => {
+    if (Object.keys(tileImageMappings).length > 0) {
+      localStorage.setItem(`keypad-tile-images-page-${activePage}`, JSON.stringify(tileImageMappings));
+    }
+  }, [tileImageMappings, activePage]);
+
+  // Send images to physical device when page changes or mappings change
+  useEffect(() => {
+    if (!isKeypad) return;
+    
+    // Don't sync while we're still loading mappings from localStorage
+    if (isLoadingMappingsRef.current) {
+      console.log(`⏸️ Deferring sync - still loading mappings for page ${activePage}`);
+      return;
+    }
+
+    // Create a key representing the current state (only page and mappings, not library)
+    const currentStateKey = `${activePage}:${JSON.stringify(tileImageMappings)}`;
+    
+    // Skip if nothing changed
+    if (lastSyncedMappingsRef.current === currentStateKey) {
+      console.log(`⏭️ Skipping sync - no changes (page ${activePage})`);
+      return;
+    }
+
+    // Update all device images when page changes or mappings change
+    const updateDeviceImages = async () => {
+      console.log(`🔄 Syncing images to device (page ${activePage})`);
+      
+      // For each tile (0-8), send the appropriate image or clear it
+      for (let i = 0; i < 9; i++) {
+        const mapping = tileImageMappings[i];
+        if (mapping) {
+          const image = imageLibrary.find(img => img.id === mapping.imageId);
+          if (image) {
+            // If this tile has position info (multi-tile), send the sliced portion
+            await sendImageToDevice(i, image, mapping.position);
+          }
+        } else {
+          // No mapping for this tile - send blank image to clear it
+          const blankBase64 = createBlankImage();
+          if (blankBase64) {
+            const blankImageObj: KeypadImage = {
+              id: `blank-${Date.now()}`,
+              name: 'blank',
+              base64: blankBase64,
+              tiles: [],
+              createdAt: Date.now()
+            };
+            await sendImageToDevice(i, blankImageObj);
+          }
+        }
+      }
+      
+      // Mark this state as synced
+      lastSyncedMappingsRef.current = currentStateKey;
+      console.log(`✓ Sync complete (page ${activePage})`);
+    };
+
+    updateDeviceImages();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePage, tileImageMappings, isKeypad]);
+  // Note: imageLibrary intentionally NOT in deps - we only sync when mappings change
 
   useEffect(() => {
     const unlisten = listen<DeviceEvent>("device-event", (event) => {
@@ -284,6 +428,294 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
     }
   };
 
+  // Image handling functions
+  const createBlankImage = (): string => {
+    // Create a blank 118x118 black image
+    const canvas = document.createElement('canvas');
+    canvas.width = 118;
+    canvas.height = 118;
+    const ctx = canvas.getContext('2d');
+    
+    if (!ctx) return '';
+
+    // Fill with black
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, 118, 118);
+
+    // Convert to JPEG and return base64
+    return canvas.toDataURL('image/jpeg', 0.85);
+  };
+
+  const convertImageToKeypadFormat = async (base64Image: string): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        // Create canvas at 118x118 (MX Keypad key size)
+        const canvas = document.createElement('canvas');
+        canvas.width = 118;
+        canvas.height = 118;
+        const ctx = canvas.getContext('2d');
+        
+        if (!ctx) {
+          reject(new Error('Failed to get canvas context'));
+          return;
+        }
+
+        // Draw image centered and scaled to fit
+        ctx.drawImage(img, 0, 0, 118, 118);
+
+        // Convert to JPEG at 85% quality (matching the example)
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              reject(new Error('Failed to convert to JPEG'));
+              return;
+            }
+
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const result = reader.result as string;
+              // Extract base64 part (remove data:image/jpeg;base64, prefix)
+              const base64 = result.split(',')[1];
+              resolve(base64);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          },
+          'image/jpeg',
+          0.85
+        );
+      };
+      img.onerror = reject;
+      img.src = base64Image;
+    });
+  };
+
+  // Slice an image into a grid portion for multi-tile display
+  const sliceImageForTile = async (
+    base64Image: string,
+    row: number,
+    col: number,
+    totalRows: number,
+    totalCols: number
+  ): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 118;
+        canvas.height = 118;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Failed to get canvas context'));
+          return;
+        }
+
+        // Calculate the portion of the source image to draw
+        const srcWidth = img.width / totalCols;
+        const srcHeight = img.height / totalRows;
+        const srcX = col * srcWidth;
+        const srcY = row * srcHeight;
+
+        // Draw the sliced portion
+        ctx.drawImage(
+          img,
+          srcX, srcY, srcWidth, srcHeight,  // Source rectangle
+          0, 0, 118, 118                     // Destination rectangle
+        );
+
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              reject(new Error('Failed to create blob'));
+              return;
+            }
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const result = reader.result as string;
+              const base64 = result.split(',')[1];
+              resolve(base64);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          },
+          'image/jpeg',
+          0.85
+        );
+      };
+      img.onerror = reject;
+      img.src = base64Image;
+    });
+  };
+
+  const sendImageToDevice = async (
+    keyIndex: number,
+    image: KeypadImage,
+    slicePosition?: { row: number; col: number; rows: number; cols: number }
+  ) => {
+    try {
+      let jpegBase64: string;
+      
+      // If slice position is provided, slice the image
+      if (slicePosition) {
+        jpegBase64 = await sliceImageForTile(
+          image.base64,
+          slicePosition.row,
+          slicePosition.col,
+          slicePosition.rows,
+          slicePosition.cols
+        );
+      } else {
+        // Convert full image to keypad format (118x118 JPEG)
+        jpegBase64 = await convertImageToKeypadFormat(image.base64);
+      }
+      
+      // Send to device
+      await invoke('set_key_image', {
+        keyIndex,
+        jpegBase64
+      });
+      
+      console.log(`✅ Image sent to physical device key ${keyIndex}${slicePosition ? ` (slice ${slicePosition.row},${slicePosition.col})` : ''}`);
+    } catch (error) {
+      console.error(`Failed to send image to device key ${keyIndex}:`, error);
+    }
+  };
+
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const base64 = e.target?.result as string;
+      const newImage: KeypadImage = {
+        id: `img-${Date.now()}`,
+        name: file.name,
+        base64,
+        tiles: [],
+        createdAt: Date.now()
+      };
+
+      const updatedLibrary = [...imageLibrary, newImage];
+      setImageLibrary(updatedLibrary);
+      localStorage.setItem('keypad-images', JSON.stringify(updatedLibrary));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const deleteImage = (imageId: string) => {
+    // Remove from library
+    const updatedLibrary = imageLibrary.filter(img => img.id !== imageId);
+    setImageLibrary(updatedLibrary);
+    localStorage.setItem('keypad-images', JSON.stringify(updatedLibrary));
+
+    // Remove from all page mappings
+    for (let page = 1; page <= 5; page++) {
+      const mappingsKey = `keypad-tile-images-page-${page}`;
+      const savedMappings = localStorage.getItem(mappingsKey);
+      if (savedMappings) {
+        try {
+          const mappings: TileImageMapping = JSON.parse(savedMappings);
+          const updatedMappings: TileImageMapping = {};
+          Object.entries(mappings).forEach(([tileIndex, data]) => {
+            if (data.imageId !== imageId) {
+              updatedMappings[Number(tileIndex)] = data;
+            }
+          });
+          localStorage.setItem(mappingsKey, JSON.stringify(updatedMappings));
+          if (page === activePage) {
+            setTileImageMappings(updatedMappings);
+          }
+        } catch (e) {
+          console.error('Failed to update mappings for page', page, e);
+        }
+      }
+    }
+  };
+
+  const assignImageToTile = (imageId: string, tileIndex: number) => {
+    const image = imageLibrary.find(img => img.id === imageId);
+    if (!image) return;
+
+    setTileImageMappings(prev => ({
+      ...prev,
+      [tileIndex]: { imageId }
+    }));
+
+    // Send to physical device
+    sendImageToDevice(tileIndex, image);
+  };
+
+  const assignImageToMultipleTiles = (imageId: string, tiles: number[]) => {
+    if (tiles.length === 0) return;
+
+    const image = imageLibrary.find(img => img.id === imageId);
+    if (!image) return;
+
+    // Calculate grid position for multi-tile spanning
+    const minTile = Math.min(...tiles);
+    const maxTile = Math.max(...tiles);
+    const minRow = Math.floor(minTile / 3);
+    const maxRow = Math.floor(maxTile / 3);
+    const minCol = minTile % 3;
+    const maxCol = maxTile % 3;
+    const rows = maxRow - minRow + 1;
+    const cols = maxCol - minCol + 1;
+
+    const newMappings: TileImageMapping = { ...tileImageMappings };
+    tiles.forEach((tile) => {
+      const row = Math.floor(tile / 3) - minRow;
+      const col = (tile % 3) - minCol;
+      newMappings[tile] = {
+        imageId,
+        position: { row, col, rows, cols }
+      };
+
+      // For multi-tile, slice and send the appropriate portion to each tile
+      const slicePosition = { row, col, rows, cols };
+      sendImageToDevice(tile, image, slicePosition);
+    });
+
+    setTileImageMappings(newMappings);
+  };
+
+  const clearTileImage = (tileIndex: number) => {
+    setTileImageMappings(prev => {
+      const updated = { ...prev };
+      delete updated[tileIndex];
+      return updated;
+    });
+
+    // Send blank image to physical device
+    const blankBase64 = createBlankImage();
+    if (blankBase64) {
+      const blankImageObj: KeypadImage = {
+        id: `blank-${Date.now()}`,
+        name: 'blank',
+        base64: blankBase64,
+        tiles: [],
+        createdAt: Date.now()
+      };
+      sendImageToDevice(tileIndex, blankImageObj);
+    }
+  };
+
+  const toggleTileSelection = (tileIndex: number) => {
+    console.log('Toggle tile selection:', { tileIndex, imageMode, currentSelectedTiles: selectedTiles });
+    if (imageMode === 'single') {
+      setSelectedTiles([tileIndex]);
+    } else {
+      setSelectedTiles(prev => {
+        if (prev.includes(tileIndex)) {
+          return prev.filter(t => t !== tileIndex);
+        } else {
+          return [...prev, tileIndex].sort((a, b) => a - b);
+        }
+      });
+    }
+  };
+
   const sections = [
     "MEDIA & VOLUME",
     "OPEN",
@@ -357,8 +789,20 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
             <KeypadConfigView 
               activeButtons={activeButtons}
               selectedComponent={selectedComponent}
-              onComponentClick={setSelectedComponent}
+              onComponentClick={(code) => {
+                if (activeTab === 'images') {
+                  if (code < 9) {  // Only allow tile selection for grid buttons (0-8)
+                    toggleTileSelection(code);
+                  }
+                } else {
+                  setSelectedComponent(code);
+                }
+              }}
               buttonMappings={buttonMappings}
+              tileImageMappings={tileImageMappings}
+              imageLibrary={imageLibrary}
+              selectedTiles={selectedTiles}
+              activeTab={activeTab}
             />
           ) : (
             <DialConfigView 
@@ -374,7 +818,7 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
           {/* Pagination Controls */}
           <div className="mt-12 flex items-center bg-[#222] rounded px-1 py-1 border border-white/5 shadow-lg">
             <span className="text-[10px] text-gray-400 font-bold px-2 uppercase tracking-widest">Pages</span>
-            {[1, 2, 3].map(page => (
+            {[1, 2, 3, 4, 5].map(page => (
               <button
                 key={page}
                 onClick={() => setActivePage(page)}
@@ -387,9 +831,6 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
                 {page}
               </button>
             ))}
-            <button className="w-6 h-6 text-gray-400 text-xs font-bold hover:bg-white/5 rounded-sm flex items-center justify-center transition-colors">
-              +
-            </button>
           </div>
         </div>
 
@@ -440,15 +881,40 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
 
       {/* RIGHT PANEL: Actions Sidebar */}
       <div className="w-[340px] bg-black border-l border-white/10 flex flex-col">
-        {/* Sidebar Header */}
+        {/* Sidebar Header with Tabs */}
         <div className="h-16 flex items-center justify-between px-4 border-b border-white/10">
-          <div className="flex items-center gap-2 border border-orange-500/50 rounded px-2 py-1 cursor-pointer">
-            <svg className="w-4 h-4 text-orange-400" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M4 6h4v4H4V6zm6 0h4v4h-4V6zm6 0h4v4h-4V6zM4 12h4v4H4v-4zm6 0h4v4h-4v-4zm6 0h4v4h-4v-4z"/>
-            </svg>
-            <span className="text-xs font-bold text-gray-300 uppercase tracking-wide">All Actions</span>
-          </div>
-          <button className="w-8 h-8 flex items-center justify-center hover:bg-white/10 rounded transition-colors">
+          {isKeypad ? (
+            <div className="flex gap-2 flex-1">
+              <button
+                onClick={() => setActiveTab('actions')}
+                className={`flex-1 px-3 py-2 text-xs font-bold uppercase tracking-wide rounded transition-all ${
+                  activeTab === 'actions'
+                    ? 'bg-cyan-400/20 text-cyan-400 border border-cyan-400/50'
+                    : 'text-gray-400 hover:text-gray-300 hover:bg-white/5'
+                }`}
+              >
+                Actions
+              </button>
+              <button
+                onClick={() => setActiveTab('images')}
+                className={`flex-1 px-3 py-2 text-xs font-bold uppercase tracking-wide rounded transition-all ${
+                  activeTab === 'images'
+                    ? 'bg-cyan-400/20 text-cyan-400 border border-cyan-400/50'
+                    : 'text-gray-400 hover:text-gray-300 hover:bg-white/5'
+                }`}
+              >
+                Images
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 border border-orange-500/50 rounded px-2 py-1 cursor-pointer">
+              <svg className="w-4 h-4 text-orange-400" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M4 6h4v4H4V6zm6 0h4v4h-4V6zm6 0h4v4h-4V6zM4 12h4v4H4v-4zm6 0h4v4h-4v-4zm6 0h4v4h-4v-4z"/>
+              </svg>
+              <span className="text-xs font-bold text-gray-300 uppercase tracking-wide">All Actions</span>
+            </div>
+          )}
+          <button className="w-8 h-8 flex items-center justify-center hover:bg-white/10 rounded transition-colors ml-2">
             <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
@@ -499,7 +965,8 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
 
         {/* List Content */}
         <div className="flex-1 overflow-y-auto p-4" style={{ scrollbarWidth: 'thin', scrollbarColor: '#333 transparent' }}>
-          {/* Actions by Category */}
+          {activeTab === 'actions' ? (
+            <>
           {sections.map(section => {
             const isRotationComponent = selectedComponent === 1000 || selectedComponent === 1001;
             const categoryActions = AVAILABLE_ACTIONS.filter(a => {
@@ -623,6 +1090,154 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
               </div>
             );
           })}
+            </>
+          ) : (
+            // Images Panel
+            <div className="flex flex-col gap-4">
+              {/* Image Upload Section */}
+              <div className="bg-[#1a1a1a] border border-white/10 rounded-lg p-4">
+                <h3 className="text-sm font-bold text-white mb-3">Upload Image</h3>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  className="hidden"
+                  id="image-upload"
+                />
+                <label
+                  htmlFor="image-upload"
+                  className="block w-full px-4 py-3 bg-cyan-400/10 hover:bg-cyan-400/20 border border-cyan-400/30 rounded cursor-pointer text-center text-sm text-cyan-400 font-bold transition-colors"
+                >
+                  Choose Image File
+                </label>
+                <p className="text-xs text-gray-500 mt-2">Supported: PNG, JPG, GIF</p>
+              </div>
+
+              {/* Image Mode Toggle */}
+              <div className="bg-[#1a1a1a] border border-white/10 rounded-lg p-4">
+                <h3 className="text-sm font-bold text-white mb-3">Selection Mode</h3>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      setImageMode('single');
+                      setSelectedTiles([]);
+                    }}
+                    className={`flex-1 px-3 py-2 text-xs font-bold uppercase rounded transition-all ${
+                      imageMode === 'single'
+                        ? 'bg-cyan-400/20 text-cyan-400 border border-cyan-400/50'
+                        : 'bg-black/40 text-gray-400 hover:text-gray-300'
+                    }`}
+                  >
+                    Single Tile
+                  </button>
+                  <button
+                    onClick={() => {
+                      setImageMode('multi');
+                      setSelectedTiles([]);
+                    }}
+                    className={`flex-1 px-3 py-2 text-xs font-bold uppercase rounded transition-all ${
+                      imageMode === 'multi'
+                        ? 'bg-cyan-400/20 text-cyan-400 border border-cyan-400/50'
+                        : 'bg-black/40 text-gray-400 hover:text-gray-300'
+                    }`}
+                  >
+                    Multi-Tile
+                  </button>
+                </div>
+                {imageMode === 'multi' && selectedTiles.length > 0 && (
+                  <div className="mt-3 text-xs text-cyan-400">
+                    Selected: {selectedTiles.length} tiles
+                  </div>
+                )}
+                {/* Clear All Images button */}
+                <button
+                  onClick={() => {
+                    // Clear all tile mappings
+                    setTileImageMappings({});
+                    // Persist the cleared mappings to localStorage
+                    localStorage.setItem(`keypad-tile-images-page-${activePage}`, JSON.stringify({}));
+                    // Send blank images to all keys on device
+                    const blankBase64 = createBlankImage();
+                    if (blankBase64) {
+                      const blankImageObj: KeypadImage = {
+                        id: `blank-${Date.now()}`,
+                        name: 'blank',
+                        base64: blankBase64,
+                        tiles: [],
+                        createdAt: Date.now()
+                      };
+                      for (let i = 0; i < 9; i++) {
+                        sendImageToDevice(i, blankImageObj);
+                      }
+                    }
+                  }}
+                  className="mt-3 w-full px-3 py-2 bg-red-500/20 text-red-400 hover:bg-red-500/30 text-xs font-bold uppercase rounded transition-all"
+                >
+                  Clear All Images (Page {activePage})
+                </button>
+              </div>
+
+              {/* Image Library */}
+              <div className="bg-[#1a1a1a] border border-white/10 rounded-lg p-4">
+                <h3 className="text-sm font-bold text-white mb-3">Image Library ({imageLibrary.length})</h3>
+                {imageLibrary.length === 0 ? (
+                  <p className="text-xs text-gray-500 text-center py-8">No images uploaded yet</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2 max-h-96 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: '#333 transparent' }}>
+                    {imageLibrary.map(image => (
+                      <div
+                        key={image.id}
+                        className="bg-black/40 border border-white/10 rounded-lg overflow-hidden hover:border-cyan-400/30 transition-colors"
+                      >
+                        <div className="aspect-square relative">
+                          <img
+                            src={image.base64}
+                            alt={image.name}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="p-2">
+                          <p className="text-xs text-white truncate mb-2" title={image.name}>
+                            {image.name}
+                          </p>
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => {
+                                console.log('Assign clicked', { imageMode, selectedTiles, imageId: image.id });
+                                if (imageMode === 'single' && selectedTiles.length === 1) {
+                                  console.log('Assigning to single tile:', selectedTiles[0]);
+                                  assignImageToTile(image.id, selectedTiles[0]);
+                                  setSelectedTiles([]);
+                                } else if (imageMode === 'multi' && selectedTiles.length > 0) {
+                                  console.log('Assigning to multiple tiles:', selectedTiles);
+                                  assignImageToMultipleTiles(image.id, selectedTiles);
+                                  setSelectedTiles([]);
+                                }
+                              }}
+                              disabled={selectedTiles.length === 0}
+                              className={`flex-1 px-2 py-1 text-xs rounded transition-colors ${
+                                selectedTiles.length > 0
+                                  ? 'bg-cyan-400/20 text-cyan-400 hover:bg-cyan-400/30'
+                                  : 'bg-black/40 text-gray-500 cursor-not-allowed'
+                              }`}
+                            >
+                              Assign
+                            </button>
+                            <button
+                              onClick={() => deleteImage(image.id)}
+                              className="px-2 py-1 bg-red-500/20 text-red-400 hover:bg-red-500/30 text-xs rounded transition-colors"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -959,12 +1574,24 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
   );
 }
 
-function KeypadConfigView({ activeButtons, selectedComponent, onComponentClick, buttonMappings }: {
+function KeypadConfigView({ activeButtons, selectedComponent, onComponentClick, buttonMappings, tileImageMappings, imageLibrary, selectedTiles, activeTab }: {
   activeButtons: Set<number>;
   selectedComponent: number | null;
   onComponentClick: (code: number) => void;
   buttonMappings: ButtonMapping;
+  tileImageMappings: TileImageMapping;
+  imageLibrary: KeypadImage[];
+  selectedTiles: number[];
+  activeTab: 'actions' | 'images';
 }) {
+  // Helper function to get image for a tile
+  const getTileImage = (tileIndex: number) => {
+    const mapping = tileImageMappings[tileIndex];
+    if (!mapping) return null;
+    const image = imageLibrary.find(img => img.id === mapping.imageId);
+    return image ? { image, position: mapping.position } : null;
+  };
+
   return (
     <div className="device-casing w-48 h-[13.5rem] rounded-[2rem] relative flex flex-col items-center pt-4 px-2 pb-3 transform scale-[1.3]">
       {/* Cable */}
@@ -974,21 +1601,53 @@ function KeypadConfigView({ activeButtons, selectedComponent, onComponentClick, 
       <div className="flex flex-col w-full max-w-[136px]">
         {/* 3x3 Grid */}
         <div className="grid grid-cols-3 gap-2 mb-3">
-          {Array.from({ length: 9 }).map((_, i) => (
+          {Array.from({ length: 9 }).map((_, i) => {
+            const tileImageData = getTileImage(i);
+            const isSelected = selectedTiles.includes(i);
+            
+            return (
             <div
               key={i}
               onClick={() => onComponentClick(i)}
-              className={`keypad-btn w-10 h-10 rounded-lg cursor-pointer transition-all relative ${
+              className={`keypad-btn w-10 h-10 rounded-lg cursor-pointer transition-all relative overflow-hidden ${
                 activeButtons.has(i) ? 'scale-95 brightness-150' : ''
               } ${
-                selectedComponent === i ? 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-[#0d0d0d]' : ''
+                selectedComponent === i && activeTab === 'actions' ? 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-[#0d0d0d]' : ''
+              } ${
+                isSelected && activeTab === 'images' ? 'ring-2 ring-green-400 ring-offset-2 ring-offset-[#0d0d0d]' : ''
               }`}
             >
+              {/* Image background */}
+              {tileImageData && (
+                <div className="absolute inset-0">
+                  {tileImageData.position ? (
+                    // Multi-tile image - show slice
+                    <div
+                      className="w-full h-full"
+                      style={{
+                        backgroundImage: `url(${tileImageData.image.base64})`,
+                        backgroundSize: `${tileImageData.position.cols * 100}% ${tileImageData.position.rows * 100}%`,
+                        backgroundPosition: `${(tileImageData.position.col / (tileImageData.position.cols - 1)) * 100}% ${(tileImageData.position.row / (tileImageData.position.rows - 1)) * 100}%`,
+                      }}
+                    />
+                  ) : (
+                    // Single-tile image
+                    <img
+                      src={tileImageData.image.base64}
+                      alt="Tile"
+                      className="w-full h-full object-cover"
+                    />
+                  )}
+                </div>
+              )}
+              
+              {/* Action indicator (overlaid on image if present) */}
               {buttonMappings[i] && (
-                <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-[#0d0d0d] shadow-[0_0_6px_rgba(34,197,94,0.8)]"></div>
+                <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-[#0d0d0d] shadow-[0_0_6px_rgba(34,197,94,0.8)] z-10"></div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Bottom Row: Arrows & Logo */}

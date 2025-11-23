@@ -2,6 +2,7 @@
 #define LOGILINUX_FFI_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -21,6 +22,7 @@ typedef enum {
   CAPABILITY_ROTATION = 0,
   CAPABILITY_BUTTONS = 1,
   CAPABILITY_HIGH_RES_SCROLL = 2,
+  CAPABILITY_LCD_DISPLAY = 3,
 } DeviceCapability;
 
 typedef enum {
@@ -92,8 +94,16 @@ bool logilinux_device_is_monitoring(LogiLinuxDevice device);
 bool logilinux_device_grab_exclusive(LogiLinuxDevice device, bool grab);
 bool logilinux_device_initialize(LogiLinuxDevice device);
 
-void logilinux_device_free(LogiLinuxDevice device);
+// LCD Display functions (MX Keypad only)
+bool logilinux_device_set_key_image(LogiLinuxDevice device, int key_index,
+                                    const uint8_t *jpeg_data, size_t jpeg_size);
+bool logilinux_device_set_key_gif(LogiLinuxDevice device, int key_index,
+                                  const uint8_t *gif_data, size_t gif_size,
+                                  bool loop);
+void logilinux_device_stop_key_animation(LogiLinuxDevice device, int key_index);
+void logilinux_device_stop_all_animations(LogiLinuxDevice device);
 
+void logilinux_device_free(LogiLinuxDevice device);
 void logilinux_get_version(int *major, int *minor, int *patch);
 
 #ifdef __cplusplus
