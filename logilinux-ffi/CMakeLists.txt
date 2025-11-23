@@ -9,7 +9,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 include(FetchContent)
 FetchContent_Declare(
     logilinux
-    GIT_REPOSITORY https://github.com/ron0studios/LogiLinux.git
+    GIT_REPOSITORY https://github.com/logilinux/LogiLinux.git
     GIT_TAG master
     SOURCE_SUBDIR lib
 )
