@@ -103,11 +103,11 @@ LogiLinuxDevice logilinux_find_device(LogiLinuxLibrary lib, DeviceType type) {
 
   try {
     auto wrapper = static_cast<LibraryWrapper *>(lib);
-    
+
     // Check if we already have this device cached
     auto cached = wrapper->device_cache.find(type);
     LogiLinux::DevicePtr device;
-    
+
     if (cached != wrapper->device_cache.end()) {
       // Reuse cached device
       device = cached->second;

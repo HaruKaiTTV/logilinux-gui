@@ -45,7 +45,11 @@ pub async fn start_device_monitoring(app: AppHandle) -> Result<(), String> {
             let mut device_types_to_monitor = std::collections::HashSet::new();
             for dev in &all_devices {
                 let device_key = format!("{}:{}", dev.vendor_id, dev.product_id);
-                log::debug!("   Found device: {} (type: {:?})", device_key, dev.device_type);
+                log::debug!(
+                    "   Found device: {} (type: {:?})",
+                    device_key,
+                    dev.device_type
+                );
                 device_types_to_monitor.insert((device_key, dev.device_type));
             }
 
@@ -57,7 +61,10 @@ pub async fn start_device_monitoring(app: AppHandle) -> Result<(), String> {
                     continue;
                 }
 
-                log::info!("🆕 New device detected: {}, attempting to start monitoring...", device_key);
+                log::info!(
+                    "🆕 New device detected: {}, attempting to start monitoring...",
+                    device_key
+                );
 
                 let device = lib.find_device(device_type);
 
@@ -201,7 +208,11 @@ pub async fn start_device_monitoring(app: AppHandle) -> Result<(), String> {
                     }
 
                     monitored_device_keys.insert(device_key.clone());
-                    log::info!("   📝 Added {} to monitored devices (total: {})", device_key, monitored_device_keys.len());
+                    log::info!(
+                        "   📝 Added {} to monitored devices (total: {})",
+                        device_key,
+                        monitored_device_keys.len()
+                    );
                     new_devices_found = true;
 
                     std::mem::forget(device);

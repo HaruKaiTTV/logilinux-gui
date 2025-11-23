@@ -12,21 +12,19 @@ static LIBRARY: Mutex<Option<LibraryPtr>> = Mutex::new(None);
 
 fn get_library() -> Result<&'static logilinux::Library, String> {
     let mut lib_opt = LIBRARY.lock().unwrap();
-    
+
     if lib_opt.is_none() {
         eprintln!("🔧 Creating LogiLinux library instance (first time)...");
         let lib = Box::new(
             logilinux::Library::new()
-                .map_err(|e| format!("Failed to initialize logilinux: {}", e))?
+                .map_err(|e| format!("Failed to initialize logilinux: {}", e))?,
         );
         let lib_ptr = Box::into_raw(lib);
         *lib_opt = Some(LibraryPtr(lib_ptr));
         eprintln!("✓ Library instance created and cached");
     }
-    
-    unsafe {
-        Ok(&*lib_opt.as_ref().unwrap().0)
-    }
+
+    unsafe { Ok(&*lib_opt.as_ref().unwrap().0) }
 }
 
 #[tauri::command]

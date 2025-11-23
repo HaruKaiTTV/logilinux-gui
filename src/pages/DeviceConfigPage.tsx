@@ -896,7 +896,6 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
       </div>
 
       {/* RIGHT PANEL: Actions Sidebar */}
-<<<<<<< HEAD
       <motion.div
         initial={{ x: 340, opacity: 0 }}
         animate={{ x: 0, opacity: 1 }}
@@ -904,10 +903,6 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
         className="w-[340px] bg-black border-l border-white/10 flex flex-col"
       >
         {/* Sidebar Header */}
-=======
-      <div className="w-[340px] bg-black border-l border-white/10 flex flex-col">
-        {/* Sidebar Header with Tabs */}
->>>>>>> refs/remotes/origin/master
         <div className="h-16 flex items-center justify-between px-4 border-b border-white/10">
           {isKeypad ? (
             <div className="flex gap-2 flex-1">

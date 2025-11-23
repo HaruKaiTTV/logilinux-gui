@@ -452,7 +452,6 @@ export function DevicesPage() {
               {devices.map((device, index) => (
                 <motion.div
                   key={device.id}
-<<<<<<< HEAD
                   initial={{ opacity: 0, scale: 0.8, y: 20 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.8 }}
@@ -468,18 +467,6 @@ export function DevicesPage() {
                     onClick={() => setSelectedDevice(device)}
                   />
                 </motion.div>
-=======
-                  device={device}
-                  activeButtons={activeButtons}
-                  dialRotation={dialRotation}
-                  wheelRotation={wheelRotation}
-                  wheelOffset={wheelOffset}
-                  dialAngle={dialAngle}
-                  tileImageMappings={tileImageMappings}
-                  imageLibrary={imageLibrary}
-                  onClick={() => setSelectedDevice(device)}
-                />
->>>>>>> refs/remotes/origin/master
               ))}
             </>
           )}

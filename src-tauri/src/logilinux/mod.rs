@@ -162,7 +162,11 @@ impl Device {
 
     pub fn set_key_image(&self, key_index: i32, jpeg_data: &[u8]) -> Result<bool, String> {
         unsafe {
-            eprintln!("🔧 Rust calling FFI with key_index={}, data_len={}", key_index, jpeg_data.len());
+            eprintln!(
+                "🔧 Rust calling FFI with key_index={}, data_len={}",
+                key_index,
+                jpeg_data.len()
+            );
             let result = ffi::logilinux_device_set_key_image(
                 self.handle,
                 key_index,
