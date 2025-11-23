@@ -34,20 +34,28 @@ pub async fn scan_python_plugins() -> Result<Vec<PythonPlugin>, String> {
 
     let mut plugins = Vec::new();
     
+    // Only include specific example plugins
+    let allowed_plugins = vec!["snake_game.py", "example_plugin.py"];
+    
     match std::fs::read_dir(&sdk_path) {
         Ok(entries) => {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().and_then(|s| s.to_str()) == Some("py") {
-                    if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                        let description = read_plugin_description(&path)
-                            .unwrap_or_else(|| "No description available".to_string());
-                        
-                        plugins.push(PythonPlugin {
-                            name: name.to_string(),
-                            path: path.to_string_lossy().to_string(),
-                            description,
-                        });
+                    if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
+                        // Only add if it's in the allowed list
+                        if allowed_plugins.contains(&filename) {
+                            if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                                let description = read_plugin_description(&path)
+                                    .unwrap_or_else(|| "No description available".to_string());
+                                
+                                plugins.push(PythonPlugin {
+                                    name: name.to_string(),
+                                    path: path.to_string_lossy().to_string(),
+                                    description,
+                                });
+                            }
+                        }
                     }
                 }
             }
