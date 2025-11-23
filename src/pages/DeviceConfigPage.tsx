@@ -62,6 +62,7 @@ const AVAILABLE_ACTIONS: Action[] = [
   { id: "mute", name: "Toggle Mute", description: "Mute/unmute audio", category: "MEDIA & VOLUME", icon: "🔇", command: "pactl set-sink-mute @DEFAULT_SINK@ toggle" },
   { id: "volume-control", name: "Volume Control", description: "Adjust volume with rotation", category: "MEDIA & VOLUME", icon: "🔊", command: "volume-control", rotationOnly: true },
   { id: "brightness-control", name: "Brightness Control", description: "Adjust brightness with rotation", category: "MEDIA & VOLUME", icon: "☀️", command: "brightness-control", rotationOnly: true },
+  { id: "scroll-control", name: "Scroll Control", description: "Scroll up/down with rotation", category: "MEDIA & VOLUME", icon: "🖱️", command: "scroll-control", rotationOnly: true },
   
   { id: "lockscreen", name: "Lock Screen", description: "Lock with hyprlock", category: "SYSTEM", icon: "🔒", command: "hyprlock" },
   { id: "custom-command", name: "Custom Command", description: "Execute any shell command", category: "SYSTEM", icon: "💻", command: "custom-command" },
@@ -426,6 +427,29 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
       try {
         await invoke("execute_command", { command: brightnessCommand });
       } catch (err) {
+      }
+      return;
+    }
+    
+    if (action.command === "scroll-control") {
+      // Simulate mouse scroll events
+      const scrollAmount = Math.abs(delta);
+      const direction = delta > 0 ? "up" : "down";
+      
+      try {
+        await invoke("execute_scroll", { direction, amount: scrollAmount });
+      } catch (err) {
+        // Fallback: use xdotool if available
+        try {
+          const scrollCmd = delta > 0 
+            ? `xdotool click 4` // scroll up
+            : `xdotool click 5`; // scroll down
+          
+          for (let i = 0; i < scrollAmount; i++) {
+            await invoke("execute_command", { command: scrollCmd });
+          }
+        } catch (fallbackErr) {
+        }
       }
       return;
     }
@@ -1965,11 +1989,11 @@ function DialConfigView({ activeButtons, dialAngle, wheelOffset, selectedCompone
           className={`tactile-btn w-7 h-7 rounded-full flex items-center justify-center relative cursor-pointer transition-all ${
             activeButtons.has(275) ? 'scale-95 brightness-150' : ''
           } ${
-            selectedComponent === 275 ? 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-[#0d0d0d]' : ''
+            selectedComponent === 275 ? '!border-2 !border-cyan-400' : ''
           }`}
         >
           {buttonMappings[275] && (
-            <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-[#0d0d0d] shadow-[0_0_6px_rgba(34,197,94,0.8)]"></div>
+            <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-[#282828] shadow-[0_0_6px_rgba(34,197,94,0.8)]"></div>
           )}
         </div>
         <div 
@@ -1977,11 +2001,11 @@ function DialConfigView({ activeButtons, dialAngle, wheelOffset, selectedCompone
           className={`tactile-btn w-7 h-7 rounded-full flex items-center justify-center relative cursor-pointer transition-all ${
             activeButtons.has(276) ? 'scale-95 brightness-150' : ''
           } ${
-            selectedComponent === 276 ? 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-[#0d0d0d]' : ''
+            selectedComponent === 276 ? '!border-2 !border-cyan-400' : ''
           }`}
         >
           {buttonMappings[276] && (
-            <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-[#0d0d0d] shadow-[0_0_6px_rgba(34,197,94,0.8)]"></div>
+            <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-[#282828] shadow-[0_0_6px_rgba(34,197,94,0.8)]"></div>
           )}
         </div>
       </div>
@@ -1996,8 +2020,8 @@ function DialConfigView({ activeButtons, dialAngle, wheelOffset, selectedCompone
       <div className="absolute top-7 right-6">
         <div 
           onClick={() => onComponentClick(1001)}
-          className={`w-14 h-8 rounded bg-[#181818] p-[2px] shadow-[inset_0_1px_3px_rgba(0,0,0,1)] border-b border-white/5 overflow-hidden cursor-pointer transition-all relative ${
-            selectedComponent === 1001 ? 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-[#0d0d0d]' : ''
+          className={`w-14 h-8 rounded bg-[#181818] p-[2px] shadow-[inset_0_1px_3px_rgba(0,0,0,1)] overflow-hidden cursor-pointer transition-all relative ${
+            selectedComponent === 1001 ? '!border-2 !border-cyan-400' : 'border-b border-white/5'
           }`}
         >
           <div 
@@ -2007,7 +2031,7 @@ function DialConfigView({ activeButtons, dialAngle, wheelOffset, selectedCompone
             }}
           ></div>
           {buttonMappings[1001] && (
-            <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-[#0d0d0d] shadow-[0_0_6px_rgba(34,197,94,0.8)]"></div>
+            <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-[#282828] shadow-[0_0_6px_rgba(34,197,94,0.8)]"></div>
           )}
         </div>
       </div>
@@ -2017,14 +2041,14 @@ function DialConfigView({ activeButtons, dialAngle, wheelOffset, selectedCompone
         <div
           onClick={() => onComponentClick(1000)}
           className={`main-dial w-32 h-32 rounded-full relative cursor-pointer transition-all duration-300 ${
-            selectedComponent === 1000 ? 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-[#0d0d0d]' : ''
+            selectedComponent === 1000 ? '!border-[3px] !border-cyan-400' : ''
           }`}
           style={{ transform: `rotate(${dialAngle}deg)` }}
         >
           {/* Indicator dot */}
           <div className="absolute top-3 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-white/20 shadow-[0_1px_2px_rgba(0,0,0,0.5),inset_0_1px_1px_rgba(255,255,255,0.3)]"></div>
           {buttonMappings[1000] && (
-            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3 h-3 bg-green-500 rounded-full border-2 border-[#0d0d0d] shadow-[0_0_6px_rgba(34,197,94,0.8)]"></div>
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3 h-3 bg-green-500 rounded-full border-2 border-[#1a1a1a] shadow-[0_0_6px_rgba(34,197,94,0.8)]"></div>
           )}
         </div>
       </div>
@@ -2036,11 +2060,11 @@ function DialConfigView({ activeButtons, dialAngle, wheelOffset, selectedCompone
           className={`tactile-btn w-10 h-10 rounded-full flex items-center justify-center relative cursor-pointer transition-all ${
             activeButtons.has(277) ? 'scale-95 brightness-150' : ''
           } ${
-            selectedComponent === 277 ? 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-[#0d0d0d]' : ''
+            selectedComponent === 277 ? '!border-2 !border-cyan-400' : ''
           }`}
         >
           {buttonMappings[277] && (
-            <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-[#0d0d0d] shadow-[0_0_6px_rgba(34,197,94,0.8)]"></div>
+            <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-[#282828] shadow-[0_0_6px_rgba(34,197,94,0.8)]"></div>
           )}
         </div>
       </div>
@@ -2050,11 +2074,11 @@ function DialConfigView({ activeButtons, dialAngle, wheelOffset, selectedCompone
           className={`tactile-btn w-10 h-10 rounded-full flex items-center justify-center relative cursor-pointer transition-all ${
             activeButtons.has(278) ? 'scale-95 brightness-150' : ''
           } ${
-            selectedComponent === 278 ? 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-[#0d0d0d]' : ''
+            selectedComponent === 278 ? '!border-2 !border-cyan-400' : ''
           }`}
         >
           {buttonMappings[278] && (
-            <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-[#0d0d0d] shadow-[0_0_6px_rgba(34,197,94,0.8)]"></div>
+            <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-[#282828] shadow-[0_0_6px_rgba(34,197,94,0.8)]"></div>
           )}
         </div>
       </div>

@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { motion, AnimatePresence } from "framer-motion";
 import { DeviceConfigPage } from "./DeviceConfigPage";
+import logiLogo from "../assets/logilogo.svg";
 
 interface DeviceInfo {
   id: string;
@@ -64,7 +65,6 @@ type TileImageMapping = {
 
 export function DevicesPage() {
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
-  const [greeting, setGreeting] = useState("Good Afternoon");
   const [activeButtons, setActiveButtons] = useState<Set<number>>(new Set());
   const [dialRotation, setDialRotation] = useState(0);
   const [wheelRotation, setWheelRotation] = useState(0);
@@ -72,6 +72,9 @@ export function DevicesPage() {
   const [dialAngle, setDialAngle] = useState(0);
   const [dialSensitivity, setDialSensitivity] = useState(1);
   const [selectedDevice, setSelectedDevice] = useState<DeviceInfo | null>(null);
+  const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
+  const settingsDropdownRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const dialSensitivityRef = useRef(dialSensitivity);
   const buttonMappingsRef = useRef<ButtonMapping>({});
   const dialAngleRef = useRef(0);
@@ -97,6 +100,20 @@ export function DevicesPage() {
   useEffect(() => {
     activeAppRef.current = activeApp;
   }, [activeApp]);
+
+  // Close settings dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (settingsDropdownRef.current && !settingsDropdownRef.current.contains(event.target as Node)) {
+        setShowSettingsDropdown(false);
+      }
+    };
+
+    if (showSettingsDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showSettingsDropdown]);
 
   // Poll for active window
   useEffect(() => {
@@ -595,12 +612,6 @@ export function DevicesPage() {
   useEffect(() => {
     console.log('🚀 DevicesPage mounting - registering event listener');
     
-    // Set greeting based on time of day
-    const hour = new Date().getHours();
-    if (hour < 12) setGreeting("Good Morning");
-    else if (hour < 18) setGreeting("Good Afternoon");
-    else setGreeting("Good Evening");
-
     // Initial load of mappings and images
     loadMappings();
     loadImageData();
@@ -784,6 +795,30 @@ export function DevicesPage() {
       return;
     }
     
+    if (action.command === "scroll-control") {
+      // Simulate mouse scroll events
+      const scrollAmount = Math.abs(delta);
+      const direction = delta > 0 ? "up" : "down";
+      
+      try {
+        await invoke("execute_scroll", { direction, amount: scrollAmount });
+      } catch (err) {
+        // Fallback: use xdotool if available
+        try {
+          const scrollCmd = delta > 0 
+            ? `xdotool click 4` // scroll up
+            : `xdotool click 5`; // scroll down
+          
+          for (let i = 0; i < scrollAmount; i++) {
+            await invoke("execute_command", { command: scrollCmd });
+          }
+        } catch (fallbackErr) {
+          // Failed
+        }
+      }
+      return;
+    }
+    
     const times = Math.abs(delta);
     for (let i = 0; i < times; i++) {
       await executeAction(action);
@@ -849,9 +884,9 @@ export function DevicesPage() {
           transition={{ duration: 0.2 }}
           className="h-20 flex items-center justify-between px-8 border-b border-white/5"
         >
-          <h1 className="text-2xl font-bold tracking-wide text-white">{greeting}</h1>
+          <img src={logiLogo} alt="LogiLinux" className="h-8" />
 
-          <div className="flex items-center gap-6">
+          <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-6">
             {/* Active App Indicator */}
             <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-400/10 border border-cyan-400/30">
               <svg className="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -870,55 +905,83 @@ export function DevicesPage() {
 
             <button className="hover:text-white transition-colors flex items-center gap-2">
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
-                <path d="M213.85,125.46l-112,120a8,8,0,0,1-13.69-7l14.66-73.33L45.19,143.49a8,8,0,0,1-3-13l112-120a8,8,0,0,1,13.69,7L153.18,90.9l57.63,21.61a8,8,0,0,1,3,12.95Z"></path>
+                <path d="M224.83,114.78l-26.26-26.26a1.42,1.42,0,0,0-.1-.11l-18.31-18.3A44.07,44.07,0,0,0,118,32h-2a44.08,44.08,0,0,0-43.8,40H56a16,16,0,0,0-16,16v32a8,8,0,0,0,16,0V88h56v80H56v-8a8,8,0,0,0-16,0v8a16,16,0,0,0,16,16h16.2A44.08,44.08,0,0,0,116,224h2a44.07,44.07,0,0,0,62.16-38.11l18.31-18.31a1.42,1.42,0,0,0,.11-.1l26.26-26.26A16,16,0,0,0,224.83,114.78ZM116,208a28,28,0,0,1,0-56h2a28,28,0,0,1,19.6,8l-28.95,28.94A8,8,0,0,0,120,200a28.06,28.06,0,0,1-4,8Zm2-136a28.08,28.08,0,0,1,27.71,24H120a8,8,0,0,0,0,16h26.88A28.11,28.11,0,0,1,135.3,131.3L116,112.69V96h2a28,28,0,0,1,0,56h-2a28,28,0,0,1-2.31-.12L125.89,139.7a8,8,0,0,0-11.31,0l-13.89,13.89A43.83,43.83,0,0,0,116,208h2a27.87,27.87,0,0,1-19.6-8l28.95-28.94A8,8,0,0,0,136,160a28.06,28.06,0,0,1,4-8Zm82.41,52.68-21.65,21.65L159.88,127.46l21.65-21.65Z"></path>
               </svg>
-              SMART ACTIONS
+              CUSTOM ACTIONS
             </button>
+            </div>
+          </div>
 
+          <div className="flex items-center gap-6 text-xs font-bold text-gray-400 tracking-wider">
             <div className="w-[1px] h-4 bg-gray-700 mx-2"></div>
 
-            {/* Import Config Button */}
-            <label className="hover:text-white transition-colors cursor-pointer" title="Import Configuration">
-              <input
-                type="file"
-                accept=".json"
-                onChange={importConfig}
-                className="hidden"
-              />
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 256 256">
-                <path d="M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Zm-42.34-61.66a8,8,0,0,1,0,11.32l-24,24a8,8,0,0,1-11.32,0l-24-24a8,8,0,0,1,11.32-11.32L120,164.69V120a8,8,0,0,1,16,0v44.69l10.34-10.35A8,8,0,0,1,157.66,154.34Z"></path>
-              </svg>
-            </label>
+            {/* Profile Button with Dropdown */}
+            <div className="relative" ref={settingsDropdownRef}>
+              <button 
+                onClick={() => setShowSettingsDropdown(!showSettingsDropdown)}
+                className="hover:text-white transition-colors"
+              >
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 256 256">
+                  <path d="M230.92,212c-15.23-26.33-38.7-45.21-66.09-54.16a72,72,0,1,0-73.66,0C63.78,166.78,40.31,185.66,25.08,212a8,8,0,1,0,13.85,8c18.84-32.56,52.14-52,89.07-52s70.23,19.44,89.07,52a8,8,0,1,0,13.85-8ZM72,96a56,56,0,1,1,56,56A56.06,56.06,0,0,1,72,96Z"></path>
+                </svg>
+              </button>
 
-            {/* Export Config Button */}
-            <button 
-              onClick={exportConfig}
-              className="hover:text-white transition-colors" 
-              title="Export Configuration"
-            >
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 256 256">
-                <path d="M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Zm-42.34-77.66a8,8,0,0,1-11.32,11.32L136,139.31V184a8,8,0,0,1-16,0V139.31l-10.34,10.35a8,8,0,0,1-11.32-11.32l24-24a8,8,0,0,1,11.32,0Z"></path>
-              </svg>
-            </button>
-
-            <button className="hover:text-white transition-colors">
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 256 256">
-                <path d="M197.58,129.06,146,110l-19-51.62a15.92,15.92,0,0,0-29.88,0L78,110l-51.62,19a15.92,15.92,0,0,0,0,29.88L78,178l19,51.62a15.92,15.92,0,0,0,29.88,0L146,178l51.62-19a15.92,15.92,0,0,0,0-29.88ZM137,164.22a8,8,0,0,0-4.74,4.74L112,223.85,91.78,169A8,8,0,0,0,87,164.22L32.15,144,87,123.78A8,8,0,0,0,91.78,119L112,64.15,132.22,119a8,8,0,0,0,4.74,4.74L191.85,144Z"></path>
-              </svg>
-            </button>
-
-            {/* User Avatar */}
-            <div className="w-8 h-8 rounded-full bg-indigo-600 overflow-hidden border border-white/20 cursor-pointer">
-              <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=C" alt="User" />
+              {/* Profile Dropdown */}
+              <AnimatePresence>
+                {showSettingsDropdown && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.2 }}
+                    className="absolute right-0 mt-2 w-48 bg-gray-900/40 backdrop-blur-md border border-white/5 rounded-xl shadow-2xl overflow-hidden z-50"
+                  >
+                    <div className="py-1">
+                      {/* Import/Export Buttons */}
+                      <div className="px-2 py-2 flex gap-2">
+                        <label className="flex-1 px-3 py-2 flex items-center justify-center gap-1.5 text-xs text-gray-400 hover:bg-white/5 hover:text-gray-200 transition-colors rounded-lg cursor-pointer">
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept=".json"
+                            onChange={importConfig}
+                            className="hidden"
+                          />
+                          <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 256 256">
+                            <path d="M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Zm-42.34-61.66a8,8,0,0,1,0,11.32l-24,24a8,8,0,0,1-11.32,0l-24-24a8,8,0,0,1,11.32-11.32L120,164.69V120a8,8,0,0,1,16,0v44.69l10.34-10.35A8,8,0,0,1,157.66,154.34Z"></path>
+                          </svg>
+                          Import
+                        </label>
+                        <button 
+                          onClick={exportConfig}
+                          className="flex-1 px-3 py-2 flex items-center justify-center gap-1.5 text-xs text-gray-400 hover:bg-white/5 hover:text-gray-200 transition-colors rounded-lg"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 256 256">
+                            <path d="M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Zm-42.34-77.66a8,8,0,0,1-11.32,11.32L136,139.31V184a8,8,0,0,1-16,0V139.31l-10.34,10.35a8,8,0,0,1-11.32-11.32l24-24a8,8,0,0,1,11.32,0Z"></path>
+                          </svg>
+                          Export
+                        </button>
+                      </div>
+                      <div className="border-t border-white/5 my-1"></div>
+                      <button className="w-full px-4 py-2.5 text-left text-sm text-gray-400 hover:bg-white/5 hover:text-gray-200 transition-colors">
+                        General Settings
+                      </button>
+                      <button className="w-full px-4 py-2.5 text-left text-sm text-gray-400 hover:bg-white/5 hover:text-gray-200 transition-colors">
+                        Appearance
+                      </button>
+                      <button className="w-full px-4 py-2.5 text-left text-sm text-gray-400 hover:bg-white/5 hover:text-gray-200 transition-colors">
+                        Notifications
+                      </button>
+                      <div className="border-t border-white/5 my-1"></div>
+                      <button className="w-full px-4 py-2.5 text-left text-sm text-gray-400 hover:bg-white/5 hover:text-gray-200 transition-colors">
+                        About
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
-
-            <button className="hover:text-white transition-colors">
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 256 256">
-                <path d="M128,80a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Zm88-29.84q.06-2.16,0-4.32l14.92-18.64a8,8,0,0,0,1.48-7.06,107.21,107.21,0,0,0-10.88-26.25a8,8,0,0,0-6-3.93l-23.72-2.64q-1.48-1.56-3-3L186,40.54a8,8,0,0,0-3.94-6,107.71,107.71,0,0,0-26.25-10.87,8,8,0,0,0-7.06,1.49L130.16,40Q128,40,125.84,40L107.2,25.11a8,8,0,0,0-7.06-1.48A107.6,107.6,0,0,0,73.89,34.51a8,8,0,0,0-3.93,6L67.32,64.27q-1.56,1.49-3,3L40.54,70a8,8,0,0,0-6,3.94,107.71,107.71,0,0,0-10.87,26.25,8,8,0,0,0,1.49,7.06L40,125.84Q40,128,40,130.16L25.11,148.8a8,8,0,0,0-1.48,7.06,107.21,107.21,0,0,0,10.88,26.25,8,8,0,0,0,6,3.93l23.72,2.64q1.48,1.56,3,3L70,215.46a8,8,0,0,0,3.94,6,107.71,107.71,0,0,0,26.25,10.87,8,8,0,0,0,7.06-1.49L125.84,216q2.16.06,4.32,0l18.64,14.92a8,8,0,0,0,7.06,1.48,107.21,107.21,0,0,0,26.25-10.88,8,8,0,0,0,3.93-6l2.64-23.72q1.56-1.48,3-3L215.46,186a8,8,0,0,0,6-3.94,107.71,107.71,0,0,0,10.87-26.25,8,8,0,0,0-1.49-7.06Zm-16.1-6.5a73.93,73.93,0,0,1,0,8.68,8,8,0,0,0,1.74,5.48l14.19,17.73a91.57,91.57,0,0,1-6.23,15L187,173.11a8,8,0,0,0-5.1,2.64,74.11,74.11,0,0,1-6.14,6.14,8,8,0,0,0-2.64,5.1l-2.51,22.58a91.32,91.32,0,0,1-15,6.23l-17.74-14.19a8,8,0,0,0-5-1.75h-.48a73.93,73.93,0,0,1-8.68,0,8,8,0,0,0-5.48,1.74L100.45,215.8a91.57,91.57,0,0,1-15-6.23L82.89,187a8,8,0,0,0-2.64-5.1,74.11,74.11,0,0,1-6.14-6.14,8,8,0,0,0-5.1-2.64L46.43,170.6a91.32,91.32,0,0,1-6.23-15l14.19-17.74a8,8,0,0,0,1.74-5.48,73.93,73.93,0,0,1,0-8.68,8,8,0,0,0-1.74-5.48L40.2,100.45a91.57,91.57,0,0,1,6.23-15L69,82.89a8,8,0,0,0,5.1-2.64,74.11,74.11,0,0,1,6.14-6.14A8,8,0,0,0,82.89,69L85.4,46.43a91.32,91.32,0,0,1,15-6.23l17.74,14.19a8,8,0,0,0,5.48,1.74,73.93,73.93,0,0,1,8.68,0,8,8,0,0,0,5.48-1.74L155.55,40.2a91.57,91.57,0,0,1,15,6.23L173.11,69a8,8,0,0,0,2.64,5.1,74.11,74.11,0,0,1,6.14,6.14,8,8,0,0,0,5.1,2.64l22.58,2.51a91.32,91.32,0,0,1,6.23,15l-14.19,17.74A8,8,0,0,0,199.87,123.66Z"></path>
-              </svg>
-            </button>
-            </div>
-            </div>
+          </div>
         </motion.header>
 
         {/* Content Area */}
