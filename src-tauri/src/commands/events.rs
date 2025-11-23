@@ -37,13 +37,15 @@ pub async fn start_device_monitoring(app: AppHandle) -> Result<(), String> {
             };
 
             log::debug!(
-                "Discovered {} device(s) in monitoring loop",
-                all_devices.len()
+                "🔍 Monitoring loop: Discovered {} device(s), currently monitoring {}",
+                all_devices.len(),
+                monitored_device_keys.len()
             );
 
             let mut device_types_to_monitor = std::collections::HashSet::new();
             for dev in &all_devices {
                 let device_key = format!("{}:{}", dev.vendor_id, dev.product_id);
+                log::debug!("   Found device: {} (type: {:?})", device_key, dev.device_type);
                 device_types_to_monitor.insert((device_key, dev.device_type));
             }
 
@@ -51,8 +53,11 @@ pub async fn start_device_monitoring(app: AppHandle) -> Result<(), String> {
 
             for (device_key, device_type) in device_types_to_monitor {
                 if monitored_device_keys.contains(&device_key) {
+                    log::debug!("   ⏭️ Skipping already monitored device: {}", device_key);
                     continue;
                 }
+
+                log::info!("🆕 New device detected: {}, attempting to start monitoring...", device_key);
 
                 let device = lib.find_device(device_type);
 
@@ -180,27 +185,33 @@ pub async fn start_device_monitoring(app: AppHandle) -> Result<(), String> {
                     device.start_monitoring();
 
                     if !device.is_monitoring() {
-                        log::error!("Failed to start monitoring for: {}", name);
+                        log::error!("❌ Failed to start monitoring for: {}", name);
                         continue;
                     }
 
+                    log::info!("✅ Started monitoring device: {}", name);
+
                     if device.grab_exclusive(true) {
-                        log::info!("Device grabbed exclusively: {}", name);
+                        log::info!("   🔒 Device grabbed exclusively: {}", name);
                     } else {
                         log::warn!(
-                            "⚠️ Could not grab device exclusively: {} (may be hidraw device)",
+                            "   ⚠️ Could not grab device exclusively: {} (may be hidraw device)",
                             name
                         );
                     }
 
-                    monitored_device_keys.insert(device_key);
+                    monitored_device_keys.insert(device_key.clone());
+                    log::info!("   📝 Added {} to monitored devices (total: {})", device_key, monitored_device_keys.len());
                     new_devices_found = true;
 
                     std::mem::forget(device);
+                } else {
+                    log::warn!("⚠️ Could not find device for key: {}", device_key);
                 }
             }
 
             if new_devices_found {
+                log::debug!("Keeping library alive due to new devices");
                 std::mem::forget(lib);
             }
 

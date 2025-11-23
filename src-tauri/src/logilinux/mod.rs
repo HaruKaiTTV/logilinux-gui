@@ -155,6 +155,24 @@ impl Device {
     pub fn grab_exclusive(&self, grab: bool) -> bool {
         unsafe { ffi::logilinux_device_grab_exclusive(self.handle, grab) }
     }
+
+    pub fn initialize(&self) -> bool {
+        unsafe { ffi::logilinux_device_initialize(self.handle) }
+    }
+
+    pub fn set_key_image(&self, key_index: i32, jpeg_data: &[u8]) -> Result<bool, String> {
+        unsafe {
+            eprintln!("🔧 Rust calling FFI with key_index={}, data_len={}", key_index, jpeg_data.len());
+            let result = ffi::logilinux_device_set_key_image(
+                self.handle,
+                key_index,
+                jpeg_data.as_ptr(),
+                jpeg_data.len(),
+            );
+            eprintln!("🔧 FFI returned: {}", result);
+            Ok(result)
+        }
+    }
 }
 
 impl Drop for Device {

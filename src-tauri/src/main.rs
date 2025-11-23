@@ -6,6 +6,7 @@ mod permissions;
 
 use commands::actions::{execute_command, execute_key_combo, execute_shell_command};
 use commands::devices::discover_devices;
+use commands::display::set_key_image;
 use commands::events::{start_device_monitoring, stop_device_monitoring};
 use commands::permissions::{check_permissions, request_elevation};
 
@@ -21,6 +22,7 @@ fn main() {
             execute_key_combo,
             execute_command,
             execute_shell_command,
+            set_key_image,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

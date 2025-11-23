@@ -2,6 +2,7 @@
 #include <cstring>
 #include <iostream>
 #include <logilinux/logilinux.h>
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -10,6 +11,8 @@
 struct LibraryWrapper {
   std::unique_ptr<LogiLinux::Library> lib;
   std::vector<LogiLinux::DevicePtr> devices;
+  // Cache devices by type to reuse the same instance
+  std::map<DeviceType, LogiLinux::DevicePtr> device_cache;
 };
 
 struct DeviceWrapper {
@@ -100,10 +103,23 @@ LogiLinuxDevice logilinux_find_device(LogiLinuxLibrary lib, DeviceType type) {
 
   try {
     auto wrapper = static_cast<LibraryWrapper *>(lib);
-    auto device = wrapper->lib->findDevice(convert_to_cpp_device_type(type));
-
-    if (!device) {
-      return nullptr;
+    
+    // Check if we already have this device cached
+    auto cached = wrapper->device_cache.find(type);
+    LogiLinux::DevicePtr device;
+    
+    if (cached != wrapper->device_cache.end()) {
+      // Reuse cached device
+      device = cached->second;
+      std::cerr << "🔧 Reusing cached device for type " << type << std::endl;
+    } else {
+      // Find and cache the device
+      device = wrapper->lib->findDevice(convert_to_cpp_device_type(type));
+      if (!device) {
+        return nullptr;
+      }
+      wrapper->device_cache[type] = device;
+      std::cerr << "🔧 Cached new device for type " << type << std::endl;
     }
 
     auto dev_wrapper = new DeviceWrapper();
@@ -315,6 +331,133 @@ bool logilinux_device_initialize(LogiLinuxDevice device) {
     std::cerr << "Unknown exception in logilinux_device_initialize"
               << std::endl;
     return false;
+  }
+}
+
+bool logilinux_device_set_key_image(LogiLinuxDevice device, int key_index,
+                                    const uint8_t *jpeg_data,
+                                    size_t jpeg_size) {
+  if (!device || !jpeg_data || jpeg_size == 0) {
+    std::cerr << "logilinux_device_set_key_image: invalid parameters"
+              << std::endl;
+    return false;
+  }
+
+  try {
+    auto wrapper = static_cast<DeviceWrapper *>(device);
+    auto *keypad =
+        dynamic_cast<LogiLinux::MXKeypadDevice *>(wrapper->device.get());
+
+    if (!keypad) {
+      std::cerr
+          << "logilinux_device_set_key_image: device is not an MXKeypadDevice"
+          << std::endl;
+      return false;
+    }
+
+    // Convert C array to std::vector
+    std::vector<uint8_t> jpeg_vec(jpeg_data, jpeg_data + jpeg_size);
+
+    std::cerr << "Setting key " << key_index << " image (" << jpeg_size
+              << " bytes)" << std::endl;
+    bool result = keypad->setKeyImage(key_index, jpeg_vec);
+
+    if (!result) {
+      std::cerr << "Failed to set key image for key " << key_index << std::endl;
+    }
+
+    return result;
+  } catch (const std::exception &e) {
+    std::cerr << "Exception in logilinux_device_set_key_image: " << e.what()
+              << std::endl;
+    return false;
+  } catch (...) {
+    std::cerr << "Unknown exception in logilinux_device_set_key_image"
+              << std::endl;
+    return false;
+  }
+}
+
+bool logilinux_device_set_key_gif(LogiLinuxDevice device, int key_index,
+                                  const uint8_t *gif_data, size_t gif_size,
+                                  bool loop) {
+  if (!device || !gif_data || gif_size == 0) {
+    std::cerr << "logilinux_device_set_key_gif: invalid parameters"
+              << std::endl;
+    return false;
+  }
+
+  try {
+    auto wrapper = static_cast<DeviceWrapper *>(device);
+    auto *keypad =
+        dynamic_cast<LogiLinux::MXKeypadDevice *>(wrapper->device.get());
+
+    if (!keypad) {
+      std::cerr
+          << "logilinux_device_set_key_gif: device is not an MXKeypadDevice"
+          << std::endl;
+      return false;
+    }
+
+    // Convert C array to std::vector
+    std::vector<uint8_t> gif_vec(gif_data, gif_data + gif_size);
+
+    std::cerr << "Setting key " << key_index << " GIF (" << gif_size
+              << " bytes, loop=" << loop << ")" << std::endl;
+    bool result = keypad->setKeyGif(key_index, gif_vec, loop);
+
+    if (!result) {
+      std::cerr << "Failed to set key GIF for key " << key_index << std::endl;
+    }
+
+    return result;
+  } catch (const std::exception &e) {
+    std::cerr << "Exception in logilinux_device_set_key_gif: " << e.what()
+              << std::endl;
+    return false;
+  } catch (...) {
+    std::cerr << "Unknown exception in logilinux_device_set_key_gif"
+              << std::endl;
+    return false;
+  }
+}
+
+void logilinux_device_stop_key_animation(LogiLinuxDevice device,
+                                         int key_index) {
+  if (!device) {
+    return;
+  }
+
+  try {
+    auto wrapper = static_cast<DeviceWrapper *>(device);
+    auto *keypad =
+        dynamic_cast<LogiLinux::MXKeypadDevice *>(wrapper->device.get());
+
+    if (keypad) {
+      keypad->stopKeyAnimation(key_index);
+    }
+  } catch (...) {
+    std::cerr << "Exception in logilinux_device_stop_key_animation"
+              << std::endl;
+  }
+}
+
+void logilinux_device_stop_all_animations(LogiLinuxDevice device) {
+  if (!device) {
+    return;
+  }
+
+  try {
+    auto wrapper = static_cast<DeviceWrapper *>(device);
+    auto *keypad =
+        dynamic_cast<LogiLinux::MXKeypadDevice *>(wrapper->device.get());
+
+    if (keypad) {
+      keypad->stopAllAnimations();
+    }
+  } catch (...) {
+    std::cerr << "Exception in logilinux_device_stop_all_animations"
+              << std::endl;
   }
 }
 

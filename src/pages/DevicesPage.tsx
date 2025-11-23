@@ -47,6 +47,21 @@ type ButtonMapping = {
   [key: number]: Action | null;
 };
 
+interface KeypadImage {
+  id: string;
+  name: string;
+  base64: string;
+  tiles: number[];
+  createdAt: number;
+}
+
+type TileImageMapping = {
+  [tileIndex: number]: {
+    imageId: string;
+    position?: { row: number; col: number; rows: number; cols: number };
+  };
+};
+
 export function DevicesPage() {
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [greeting, setGreeting] = useState("Good Afternoon");
@@ -62,6 +77,10 @@ export function DevicesPage() {
   const dialAngleRef = useRef(0);
   const selectedDeviceRef = useRef<DeviceInfo | null>(null);
 
+  // Image state
+  const [imageLibrary, setImageLibrary] = useState<KeypadImage[]>([]);
+  const [tileImageMappings, setTileImageMappings] = useState<TileImageMapping>({});
+
   useEffect(() => {
     dialAngleRef.current = dialAngle;
   }, [dialAngle]);
@@ -72,19 +91,46 @@ export function DevicesPage() {
 
   // Load button mappings from localStorage
   const loadMappings = () => {
-    const deviceTypes = ["DIALPAD", "KEYPAD", "default"];
+    const deviceTypes = ["DIALPAD", "CREATIVE_CONSOLE", "default"];
+    const activePage = parseInt(localStorage.getItem("active-page") || "1", 10);
     
     for (const deviceType of deviceTypes) {
-      const storageKey = `button-mappings-${deviceType}`;
+      const storageKey = `button-mappings-${deviceType}-page-${activePage}`;
       const saved = localStorage.getItem(storageKey);
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
           buttonMappingsRef.current = parsed;
+          console.log(`📋 Loaded ${Object.keys(parsed).length} button mappings for ${deviceType} page ${activePage}`);
           return;
         } catch (err) {
-          // Failed to parse
+          console.error(`Failed to parse mappings for ${deviceType}:`, err);
         }
+      }
+    }
+    console.log(`⚠️ No button mappings found for page ${activePage}`);
+  };
+
+  // Load image library and mappings
+  const loadImageData = () => {
+    // Load image library (shared across all pages)
+    const savedLibrary = localStorage.getItem('keypad-images');
+    if (savedLibrary) {
+      try {
+        setImageLibrary(JSON.parse(savedLibrary));
+      } catch (e) {
+        console.error('Failed to load image library:', e);
+      }
+    }
+
+    // Load tile-image mappings for active page
+    const activePage = parseInt(localStorage.getItem("active-page") || "1", 10);
+    const savedMappings = localStorage.getItem(`keypad-tile-images-page-${activePage}`);
+    if (savedMappings) {
+      try {
+        setTileImageMappings(JSON.parse(savedMappings));
+      } catch (e) {
+        console.error('Failed to load tile-image mappings:', e);
       }
     }
   };
@@ -92,6 +138,7 @@ export function DevicesPage() {
   // Load mappings on mount and when devices change
   useEffect(() => {
     loadMappings();
+    loadImageData();
   }, [devices]);
 
   // Reload mappings when returning from config page
@@ -99,6 +146,7 @@ export function DevicesPage() {
     if (!selectedDevice) {
       // Just came back from config page, reload mappings
       loadMappings();
+      loadImageData();
     }
   }, [selectedDevice]);
 
@@ -404,6 +452,7 @@ export function DevicesPage() {
               {devices.map((device, index) => (
                 <motion.div
                   key={device.id}
+<<<<<<< HEAD
                   initial={{ opacity: 0, scale: 0.8, y: 20 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.8 }}
@@ -419,6 +468,18 @@ export function DevicesPage() {
                     onClick={() => setSelectedDevice(device)}
                   />
                 </motion.div>
+=======
+                  device={device}
+                  activeButtons={activeButtons}
+                  dialRotation={dialRotation}
+                  wheelRotation={wheelRotation}
+                  wheelOffset={wheelOffset}
+                  dialAngle={dialAngle}
+                  tileImageMappings={tileImageMappings}
+                  imageLibrary={imageLibrary}
+                  onClick={() => setSelectedDevice(device)}
+                />
+>>>>>>> refs/remotes/origin/master
               ))}
             </>
           )}
@@ -442,13 +503,15 @@ export function DevicesPage() {
   );
 }
 
-function DeviceCard({ device, activeButtons, dialRotation, wheelRotation, wheelOffset, dialAngle, onClick }: {
+function DeviceCard({ device, activeButtons, dialRotation, wheelRotation, wheelOffset, dialAngle, tileImageMappings, imageLibrary, onClick }: {
   device: DeviceInfo;
   activeButtons: Set<number>;
   dialRotation: number;
   wheelRotation: number;
   wheelOffset: number;
   dialAngle: number;
+  tileImageMappings: TileImageMapping;
+  imageLibrary: KeypadImage[];
   onClick: () => void;
 }) {
   // DIALPAD = MX Dialpad Mouse (dial controller)
@@ -468,7 +531,11 @@ function DeviceCard({ device, activeButtons, dialRotation, wheelRotation, wheelO
           <DialDevice activeButtons={activeButtons} dialRotation={dialRotation} wheelRotation={wheelRotation} wheelOffset={wheelOffset} dialAngle={dialAngle} />
         ) : (
           <div className="scale-[1.2]">
-            <KeypadDevice activeButtons={activeButtons} />
+            <KeypadDevice 
+              activeButtons={activeButtons} 
+              tileImageMappings={tileImageMappings}
+              imageLibrary={imageLibrary}
+            />
           </div>
         )}
       </div>
@@ -550,11 +617,23 @@ function DialDevice({ activeButtons, dialRotation, wheelRotation, wheelOffset, d
   );
 }
 
-function KeypadDevice({ activeButtons }: { activeButtons: Set<number> }) {
+function KeypadDevice({ activeButtons, tileImageMappings, imageLibrary }: { 
+  activeButtons: Set<number>;
+  tileImageMappings: TileImageMapping;
+  imageLibrary: KeypadImage[];
+}) {
   // MX Keypad button codes:
   // 0-8 = Grid buttons (3x3 layout)
   // 0xa1 (161) = P1 (Left navigation)
   // 0xa2 (162) = P2 (Right navigation)
+  
+  // Helper function to get image for a tile
+  const getTileImage = (tileIndex: number) => {
+    const mapping = tileImageMappings[tileIndex];
+    if (!mapping) return null;
+    const image = imageLibrary.find(img => img.id === mapping.imageId);
+    return image ? { image, position: mapping.position } : null;
+  };
   
   return (
     <div className="device-casing w-48 h-[13.5rem] rounded-[2rem] relative flex flex-col items-center pt-4 px-2 pb-3">
@@ -565,12 +644,42 @@ function KeypadDevice({ activeButtons }: { activeButtons: Set<number> }) {
       <div className="flex flex-col w-full max-w-[136px]">
         {/* 3x3 Grid */}
         <div className="grid grid-cols-3 gap-2 mb-3">
-          {Array.from({ length: 9 }).map((_, i) => (
+          {Array.from({ length: 9 }).map((_, i) => {
+            const tileImageData = getTileImage(i);
+            
+            return (
             <div
               key={i}
-              className={`keypad-btn w-10 h-10 rounded-lg transition-transform ${activeButtons.has(i) ? 'scale-95 brightness-150' : ''}`}
-            ></div>
-          ))}
+              className={`keypad-btn w-10 h-10 rounded-lg transition-transform relative overflow-hidden ${
+                activeButtons.has(i) ? 'scale-95 brightness-150' : ''
+              }`}
+            >
+              {/* Image background */}
+              {tileImageData && (
+                <div className="absolute inset-0">
+                  {tileImageData.position ? (
+                    // Multi-tile image - show slice
+                    <div
+                      className="w-full h-full"
+                      style={{
+                        backgroundImage: `url(${tileImageData.image.base64})`,
+                        backgroundSize: `${tileImageData.position.cols * 100}% ${tileImageData.position.rows * 100}%`,
+                        backgroundPosition: `${(tileImageData.position.col / (tileImageData.position.cols - 1)) * 100}% ${(tileImageData.position.row / (tileImageData.position.rows - 1)) * 100}%`,
+                      }}
+                    />
+                  ) : (
+                    // Single-tile image
+                    <img
+                      src={tileImageData.image.base64}
+                      alt="Tile"
+                      className="w-full h-full object-cover"
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+            );
+          })}
         </div>
 
         {/* Bottom Row: Arrows & Logo */}

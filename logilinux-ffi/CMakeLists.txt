@@ -5,20 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Include FetchContent for downloading logilinux
-include(FetchContent)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../ref/logilinux/lib ${CMAKE_CURRENT_BINARY_DIR}/logilinux)
 
-# Fetch logilinux library from GitHub
-FetchContent_Declare(
-    logilinux
-    GIT_REPOSITORY https://github.com/ron0studios/logilinux.git
-    GIT_TAG master
-    SOURCE_SUBDIR lib
-)
-
-FetchContent_MakeAvailable(logilinux)
-
-# Create the FFI wrapper library
 add_library(logilinux-ffi SHARED
     src/logilinux_ffi.cpp
 )
@@ -28,7 +16,7 @@ target_include_directories(logilinux-ffi
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
     PRIVATE
-    ${logilinux_SOURCE_DIR}/lib/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ref/logilinux/lib/src
 )
 
 target_link_libraries(logilinux-ffi
