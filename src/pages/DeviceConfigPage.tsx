@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { motion, AnimatePresence } from "framer-motion";
 
 interface DeviceConfigPageProps {
   deviceName: string;
@@ -736,7 +737,12 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
       {/* LEFT PANEL: Device View */}
       <div className="flex-1 flex flex-col relative">
         {/* Header */}
-        <header className="h-16 flex items-center justify-between px-6 z-10">
+        <motion.header
+          initial={{ y: -20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ duration: 0.2, delay: 0.1 }}
+          className="h-16 flex items-center justify-between px-6 z-10"
+        >
           {/* Back Button */}
           <button 
             onClick={onBack}
@@ -781,10 +787,15 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
 
           {/* Spacer */}
           <div className="w-8"></div>
-        </header>
+        </motion.header>
 
         {/* Device Stage */}
-        <div className="flex-1 flex flex-col items-center justify-center relative pb-8">
+        <motion.div
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ duration: 0.3, delay: 0.15 }}
+          className="flex-1 flex flex-col items-center justify-center relative pb-8"
+        >
           {isKeypad ? (
             <KeypadConfigView 
               activeButtons={activeButtons}
@@ -832,10 +843,15 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
               </button>
             ))}
           </div>
-        </div>
+        </motion.div>
 
         {/* Bottom Dock */}
-        <div className="h-16 px-8 flex items-center justify-between">
+        <motion.div
+          initial={{ y: 20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ duration: 0.2, delay: 0.2 }}
+          className="h-16 px-8 flex items-center justify-between"
+        >
           <div className="flex gap-6 text-gray-600">
             <svg className="w-5 h-5 hover:text-white transition-colors cursor-pointer" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
@@ -869,7 +885,7 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
           </div>
-        </div>
+        </motion.div>
 
         {/* Beta Tag */}
         <div className="absolute bottom-0 left-1/2 -translate-x-1/2 z-20">
@@ -880,8 +896,18 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
       </div>
 
       {/* RIGHT PANEL: Actions Sidebar */}
+<<<<<<< HEAD
+      <motion.div
+        initial={{ x: 340, opacity: 0 }}
+        animate={{ x: 0, opacity: 1 }}
+        transition={{ duration: 0.3, delay: 0.1 }}
+        className="w-[340px] bg-black border-l border-white/10 flex flex-col"
+      >
+        {/* Sidebar Header */}
+=======
       <div className="w-[340px] bg-black border-l border-white/10 flex flex-col">
         {/* Sidebar Header with Tabs */}
+>>>>>>> refs/remotes/origin/master
         <div className="h-16 flex items-center justify-between px-4 border-b border-white/10">
           {isKeypad ? (
             <div className="flex gap-2 flex-1">
@@ -918,6 +944,16 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
             <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
+          </button>
+        </div>
+
+        {/* Smart Create Button */}
+        <div className="px-4 pt-4 pb-3">
+          <button className="w-full bg-black/40 hover:bg-black/60 text-white font-bold py-3 px-4 rounded-lg transition-all border border-white/10 hover:border-transparent hover:shadow-[0_0_20px_rgba(168,85,247,0.4),0_0_40px_rgba(59,130,246,0.3)] hover:ring-2 hover:ring-purple-500/50 flex items-center justify-center gap-2 group">
+            <svg className="w-5 h-5 text-gray-400 group-hover:text-purple-400 transition-colors" fill="currentColor" viewBox="0 0 256 256">
+              <path d="M197.58,129.06,146,110l-19-51.62a15.92,15.92,0,0,0-29.88,0L78,110l-51.62,19a15.92,15.92,0,0,0,0,29.88L78,178l19,51.62a15.92,15.92,0,0,0,29.88,0L146,178l51.62-19a15.92,15.92,0,0,0,0-29.88ZM137,164.22a8,8,0,0,0-4.74,4.74L112,223.85,91.78,169A8,8,0,0,0,87,164.22L32.15,144,87,123.78A8,8,0,0,0,91.78,119L112,64.15,132.22,119a8,8,0,0,0,4.74,4.74L191.85,144Z"></path>
+            </svg>
+            <span className="text-sm tracking-wide text-gray-300 group-hover:text-white transition-colors">SMART CREATE</span>
           </button>
         </div>
 
@@ -1239,13 +1275,26 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
             </div>
           )}
         </div>
-      </div>
+      </motion.div>
     </div>
 
     {/* Configuration Modal */}
+    <AnimatePresence>
     {showConfigModal && configAction && (
-      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-        <div className="bg-[#1a1a1a] border border-white/10 rounded-lg p-6 w-96 shadow-2xl">
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.2 }}
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
+      >
+        <motion.div
+          initial={{ scale: 0.9, opacity: 0, y: 20 }}
+          animate={{ scale: 1, opacity: 1, y: 0 }}
+          exit={{ scale: 0.9, opacity: 0, y: 20 }}
+          transition={{ duration: 0.2 }}
+          className="bg-[#1a1a1a] border border-white/10 rounded-lg p-6 w-96 shadow-2xl"
+        >
           <h3 className="text-lg font-bold text-white mb-4">
             {configAction.id === "volume-control" ? "Configure Volume Control" :
              configAction.id === "brightness-control" ? "Configure Brightness Control" :
@@ -1567,9 +1616,10 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
               Save
             </button>
           </div>
-        </div>
-      </div>
+        </motion.div>
+      </motion.div>
     )}
+    </AnimatePresence>
     </div>
   );
 }
