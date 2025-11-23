@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, memo, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { motion, AnimatePresence } from "framer-motion";
@@ -93,6 +93,11 @@ export function DevicesPage() {
   const appSwitchDebounceRef = useRef<number | null>(null);
   const blankImageCacheRef = useRef<string | null>(null);
   const lastSyncedMappingsRef = useRef<string>("");  // Track last synced state as JSON string
+  
+  // Throttle rotation updates for performance
+  const rotationFrameRef = useRef<number | null>(null);
+  const pendingDialAngleRef = useRef<number>(0);
+  const pendingWheelOffsetRef = useRef<number>(0);
 
   useEffect(() => {
     dialAngleRef.current = dialAngle;
@@ -105,6 +110,15 @@ export function DevicesPage() {
   useEffect(() => {
     activeAppRef.current = activeApp;
   }, [activeApp]);
+  
+  // Cleanup rotation animation frame on unmount
+  useEffect(() => {
+    return () => {
+      if (rotationFrameRef.current) {
+        cancelAnimationFrame(rotationFrameRef.current);
+      }
+    };
+  }, []);
 
   // Close settings dropdown when clicking outside
   useEffect(() => {
@@ -727,23 +741,43 @@ export function DevicesPage() {
       if (event.rotation_type === "DIAL") {
         const sensitivity = dialSensitivityRef.current;
         setDialRotation(event.delta);
-        setDialAngle(prev => prev + event.delta * sensitivity);
+        
+        // Throttle angle updates using requestAnimationFrame
+        pendingDialAngleRef.current += event.delta * sensitivity;
+        
+        if (!rotationFrameRef.current) {
+          rotationFrameRef.current = requestAnimationFrame(() => {
+            setDialAngle(prev => prev + pendingDialAngleRef.current);
+            pendingDialAngleRef.current = 0;
+            rotationFrameRef.current = null;
+          });
+        }
+        
         setTimeout(() => setDialRotation(0), 300);
         
         // Dial rotation is button 1000 on the dialpad
         const action = dialpadMappingsRef.current[1000];
-        console.log(`🎛️ Dial rotated (delta: ${event.delta}), action:`, action);
         if (action && event.delta) {
           executeRotationAction(action, event.delta);
         }
       } else if (event.rotation_type === "WHEEL") {
         setWheelRotation(event.delta);
-        setWheelOffset(prev => prev - event.delta * 3);
+        
+        // Throttle wheel offset updates using requestAnimationFrame
+        pendingWheelOffsetRef.current -= event.delta * 3;
+        
+        if (!rotationFrameRef.current) {
+          rotationFrameRef.current = requestAnimationFrame(() => {
+            setWheelOffset(prev => prev + pendingWheelOffsetRef.current);
+            pendingWheelOffsetRef.current = 0;
+            rotationFrameRef.current = null;
+          });
+        }
+        
         setTimeout(() => setWheelRotation(0), 300);
         
         // Wheel rotation is button 1001 on the dialpad
         const action = dialpadMappingsRef.current[1001];
-        console.log(`🎛️ Wheel rotated (delta: ${event.delta}), action:`, action);
         if (action && event.delta) {
           executeRotationAction(action, event.delta);
         }
@@ -904,7 +938,7 @@ export function DevicesPage() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
+          transition={{ duration: 0.1 }}
         >
           <DeviceConfigPage
             deviceName={selectedDevice.name}
@@ -923,7 +957,7 @@ export function DevicesPage() {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        transition={{ duration: 0.2 }}
+        transition={{ duration: 0.1 }}
         className="dark-bg w-screen h-screen flex overflow-hidden text-white"
       >
       {/* Main App Window */}
@@ -934,7 +968,7 @@ export function DevicesPage() {
           initial={{ y: -20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: -20, opacity: 0 }}
-          transition={{ duration: 0.2 }}
+          transition={{ duration: 0.1 }}
           className="h-20 flex items-center justify-between px-8 border-b border-white/5"
         >
           <img src={logiLogo} alt="LogiLinux" className="h-8" />
@@ -991,7 +1025,7 @@ export function DevicesPage() {
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    transition={{ duration: 0.2 }}
+                    transition={{ duration: 0.1 }}
                     className="absolute right-0 mt-2 w-48 bg-gray-900/40 backdrop-blur-md border border-white/5 rounded-xl shadow-2xl overflow-hidden z-50"
                   >
                     <div className="py-1">
@@ -1047,14 +1081,14 @@ export function DevicesPage() {
           {/* Main Content */}
           <motion.main 
             animate={{ x: showCustomActions ? '-100%' : '0%' }}
-            transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
+            transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }}
             className="absolute inset-0 flex items-center justify-center gap-16 pb-8"
           >
             {devices.length === 0 ? (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3 }}
+                transition={{ duration: 0.15 }}
                 className="text-center"
               >
                 <div className="text-gray-500 text-lg font-medium mb-2">No devices connected</div>
@@ -1065,10 +1099,10 @@ export function DevicesPage() {
                 {devices.map((device, index) => (
                   <motion.div
                     key={device.id}
-                    initial={{ opacity: 0, scale: 0.8, y: 20 }}
+                    initial={{ opacity: 0, scale: 0.9, y: 20 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.8 }}
-                    transition={{ duration: 0.3, delay: index * 0.1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    transition={{ duration: 0.15, delay: index * 0.05 }}
                   >
                     <DeviceCard
                       device={device}
@@ -1090,7 +1124,7 @@ export function DevicesPage() {
           {/* Custom Actions Panel */}
           <motion.div
             animate={{ x: showCustomActions ? '0%' : '100%' }}
-            transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
+            transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }}
             className="absolute inset-0"
           >
             <CustomActionsPage onBack={() => setShowCustomActions(false)} />
@@ -1134,16 +1168,16 @@ function DeviceCard({ device, activeButtons, dialRotation, wheelRotation, wheelO
     <motion.div
       whileHover={{ scale: 1.05 }}
       whileTap={{ scale: 0.98 }}
-      transition={{ duration: 0.2 }}
+      transition={{ duration: 0.1, ease: "easeOut" }}
       className="flex flex-col items-center cursor-pointer"
       onClick={onClick}
     >
       <div className="h-72 flex items-center justify-center">
         {isDial ? (
-          <DialDevice activeButtons={activeButtons} dialRotation={dialRotation} wheelRotation={wheelRotation} wheelOffset={wheelOffset} dialAngle={dialAngle} />
+          <MemoizedDialDevice activeButtons={activeButtons} dialRotation={dialRotation} wheelRotation={wheelRotation} wheelOffset={wheelOffset} dialAngle={dialAngle} />
         ) : (
           <div className="scale-[1.2]">
-            <KeypadDevice 
+            <MemoizedKeypadDevice 
               activeButtons={activeButtons} 
               tileImageMappings={tileImageMappings}
               imageLibrary={imageLibrary}
@@ -1185,8 +1219,12 @@ function DialDevice({ activeButtons, dialRotation, wheelRotation, wheelOffset, d
     <div className="device-casing w-64 h-64 rounded-[2.5rem] relative">
       {/* Top Left: Small Buttons */}
       <div className="absolute top-7 left-7 flex gap-2">
-        <div className={`tactile-btn w-7 h-7 rounded-full flex items-center justify-center relative transition-transform ${activeButtons.has(275) ? 'scale-95 brightness-150' : ''}`}></div>
-        <div className={`tactile-btn w-7 h-7 rounded-full flex items-center justify-center relative transition-transform ${activeButtons.has(276) ? 'scale-95 brightness-150' : ''}`}></div>
+        <div className={`tactile-btn w-7 h-7 rounded-full flex items-center justify-center relative ${activeButtons.has(275) ? 'scale-95 brightness-150' : ''}`}
+          style={{ transition: 'transform 50ms ease-out' }}
+        ></div>
+        <div className={`tactile-btn w-7 h-7 rounded-full flex items-center justify-center relative ${activeButtons.has(276) ? 'scale-95 brightness-150' : ''}`}
+          style={{ transition: 'transform 50ms ease-out' }}
+        ></div>
       </div>
 
       {/* Center Top: Logo & LED */}
@@ -1199,9 +1237,11 @@ function DialDevice({ activeButtons, dialRotation, wheelRotation, wheelOffset, d
       <div className="absolute top-7 right-6">
         <div className="w-14 h-8 rounded bg-[#181818] p-[2px] shadow-[inset_0_1px_3px_rgba(0,0,0,1)] border-b border-white/5 overflow-hidden">
           <div 
-            className="roller-wheel w-full h-full rounded-[1px] transition-all duration-300"
+            className="roller-wheel w-full h-full rounded-[1px]"
             style={{ 
-              backgroundPositionY: `${wheelOffset}px`
+              backgroundPositionY: `${wheelOffset}px`,
+              transition: 'background-position 100ms linear',
+              willChange: 'background-position'
             }}
           ></div>
         </div>
@@ -1210,8 +1250,12 @@ function DialDevice({ activeButtons, dialRotation, wheelRotation, wheelOffset, d
       {/* Center: The Big Dial */}
       <div className="absolute top-[55%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-36 h-36 rounded-full bg-[#1a1a1a] shadow-inner flex items-center justify-center">
         <div
-          className="main-dial w-32 h-32 rounded-full relative transition-transform duration-300"
-          style={{ transform: `rotate(${dialAngle}deg)` }}
+          className="main-dial w-32 h-32 rounded-full relative"
+          style={{ 
+            transform: `rotate(${dialAngle}deg)`,
+            transition: 'transform 100ms linear',
+            willChange: 'transform'
+          }}
         >
           {/* Indicator dot */}
           <div className="absolute top-3 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-white/20 shadow-[0_1px_2px_rgba(0,0,0,0.5),inset_0_1px_1px_rgba(255,255,255,0.3)]"></div>
@@ -1220,14 +1264,32 @@ function DialDevice({ activeButtons, dialRotation, wheelRotation, wheelOffset, d
 
       {/* Bottom Buttons */}
       <div className="absolute bottom-6 left-6">
-        <div className={`tactile-btn w-10 h-10 rounded-full flex items-center justify-center relative transition-transform ${activeButtons.has(277) ? 'scale-95 brightness-150' : ''}`}></div>
+        <div className={`tactile-btn w-10 h-10 rounded-full flex items-center justify-center relative ${activeButtons.has(277) ? 'scale-95 brightness-150' : ''}`}
+          style={{ transition: 'transform 50ms ease-out' }}
+        ></div>
       </div>
       <div className="absolute bottom-6 right-6">
-        <div className={`tactile-btn w-10 h-10 rounded-full flex items-center justify-center relative transition-transform ${activeButtons.has(278) ? 'scale-95 brightness-150' : ''}`}></div>
+        <div className={`tactile-btn w-10 h-10 rounded-full flex items-center justify-center relative ${activeButtons.has(278) ? 'scale-95 brightness-150' : ''}`}
+          style={{ transition: 'transform 50ms ease-out' }}
+        ></div>
       </div>
     </div>
   );
 }
+
+// Memoize DialDevice to prevent re-renders when props haven't changed
+const MemoizedDialDevice = memo(DialDevice, (prev, next) => {
+  // Custom comparison for activeButtons Set
+  const buttonsEqual = prev.activeButtons.size === next.activeButtons.size &&
+    Array.from(prev.activeButtons).every(btn => next.activeButtons.has(btn));
+  
+  return buttonsEqual &&
+    prev.dialRotation === next.dialRotation &&
+    prev.wheelRotation === next.wheelRotation &&
+    prev.wheelOffset === next.wheelOffset &&
+    prev.dialAngle === next.dialAngle;
+});
+MemoizedDialDevice.displayName = 'DialDevice';
 
 function KeypadDevice({ activeButtons, tileImageMappings, imageLibrary }: { 
   activeButtons: Set<number>;
@@ -1263,9 +1325,10 @@ function KeypadDevice({ activeButtons, tileImageMappings, imageLibrary }: {
             return (
             <div
               key={i}
-              className={`keypad-btn w-10 h-10 rounded-lg transition-transform relative overflow-hidden ${
+              className={`keypad-btn w-10 h-10 rounded-lg relative overflow-hidden ${
                 activeButtons.has(i) ? 'scale-95 brightness-150' : ''
               }`}
+              style={{ transition: 'transform 50ms ease-out' }}
             >
               {/* Image background */}
               {tileImageData && (
@@ -1298,12 +1361,16 @@ function KeypadDevice({ activeButtons, tileImageMappings, imageLibrary }: {
         {/* Bottom Row: Arrows & Logo */}
         <div className="flex items-end w-full mt-auto">
           <div className="flex gap-2">
-            <div className={`arrow-btn w-10 h-8 rounded-lg flex items-center justify-center transition-transform ${activeButtons.has(0xa1) ? 'scale-95 brightness-150' : ''}`}>
+            <div className={`arrow-btn w-10 h-8 rounded-lg flex items-center justify-center ${activeButtons.has(0xa1) ? 'scale-95 brightness-150' : ''}`}
+              style={{ transition: 'transform 50ms ease-out' }}
+            >
               <svg className="w-3 h-3 text-gray-500" fill="currentColor" viewBox="0 0 256 256">
                 <path d="M165.66,202.34a8,8,0,0,1-11.32,11.32l-80-80a8,8,0,0,1,0-11.32l80-80a8,8,0,0,1,11.32,11.32L91.31,128Z"></path>
               </svg>
             </div>
-            <div className={`arrow-btn w-10 h-8 rounded-lg flex items-center justify-center transition-transform ${activeButtons.has(0xa2) ? 'scale-95 brightness-150' : ''}`}>
+            <div className={`arrow-btn w-10 h-8 rounded-lg flex items-center justify-center ${activeButtons.has(0xa2) ? 'scale-95 brightness-150' : ''}`}
+              style={{ transition: 'transform 50ms ease-out' }}
+            >
               <svg className="w-3 h-3 text-gray-500" fill="currentColor" viewBox="0 0 256 256">
                 <path d="M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z"></path>
               </svg>
@@ -1317,3 +1384,20 @@ function KeypadDevice({ activeButtons, tileImageMappings, imageLibrary }: {
     </div>
   );
 }
+
+// Memoize KeypadDevice to prevent re-renders when props haven't changed
+const MemoizedKeypadDevice = memo(KeypadDevice, (prev, next) => {
+  // Custom comparison for activeButtons Set
+  const buttonsEqual = prev.activeButtons.size === next.activeButtons.size &&
+    Array.from(prev.activeButtons).every(btn => next.activeButtons.has(btn));
+  
+  // Compare tileImageMappings
+  const mappingsEqual = JSON.stringify(prev.tileImageMappings) === JSON.stringify(next.tileImageMappings);
+  
+  // Compare imageLibrary
+  const libraryEqual = prev.imageLibrary.length === next.imageLibrary.length &&
+    prev.imageLibrary.every((img, i) => img.id === next.imageLibrary[i]?.id);
+  
+  return buttonsEqual && mappingsEqual && libraryEqual;
+});
+MemoizedKeypadDevice.displayName = 'KeypadDevice';

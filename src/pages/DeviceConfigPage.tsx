@@ -59,23 +59,23 @@ type TileImageMapping = {
 };
 
 const AVAILABLE_ACTIONS: Action[] = [
-  { id: "mute", name: "Toggle Mute", description: "Mute/unmute audio", category: "MEDIA & VOLUME", icon: "🔇", command: "pactl set-sink-mute @DEFAULT_SINK@ toggle" },
-  { id: "volume-control", name: "Volume Control", description: "Adjust volume with rotation", category: "MEDIA & VOLUME", icon: "🔊", command: "volume-control", rotationOnly: true },
-  { id: "brightness-control", name: "Brightness Control", description: "Adjust brightness with rotation", category: "MEDIA & VOLUME", icon: "☀️", command: "brightness-control", rotationOnly: true },
-  { id: "scroll-control", name: "Scroll Control", description: "Scroll up/down with rotation", category: "MEDIA & VOLUME", icon: "🖱️", command: "scroll-control", rotationOnly: true },
+  { id: "mute", name: "Toggle Mute", description: "Mute/unmute audio", category: "MEDIA & VOLUME", icon: "VOL", command: "pactl set-sink-mute @DEFAULT_SINK@ toggle" },
+  { id: "volume-control", name: "Volume Control", description: "Adjust volume with rotation", category: "MEDIA & VOLUME", icon: "VOL", command: "volume-control", rotationOnly: true },
+  { id: "brightness-control", name: "Brightness Control", description: "Adjust brightness with rotation", category: "MEDIA & VOLUME", icon: "BRT", command: "brightness-control", rotationOnly: true },
+  { id: "scroll-control", name: "Scroll Control", description: "Scroll up/down with rotation", category: "MEDIA & VOLUME", icon: "SCR", command: "scroll-control", rotationOnly: true },
   
-  { id: "lockscreen", name: "Lock Screen", description: "Lock with hyprlock", category: "SYSTEM", icon: "🔒", command: "hyprlock" },
-  { id: "custom-command", name: "Custom Command", description: "Execute any shell command", category: "SYSTEM", icon: "💻", command: "custom-command" },
+  { id: "lockscreen", name: "Lock Screen", description: "Lock with hyprlock", category: "SYSTEM", icon: "LCK", command: "hyprlock" },
+  { id: "custom-command", name: "Custom Command", description: "Execute any shell command", category: "SYSTEM", icon: "CMD", command: "custom-command" },
   
-  { id: "workspace-goto", name: "Go to Workspace", description: "Switch to specific workspace", category: "NAVIGATION", icon: "🎯", command: "workspace-goto" },
-  { id: "workspace-prev", name: "Previous Workspace", description: "Switch to previous workspace", category: "NAVIGATION", icon: "⬅️", command: "hyprctl dispatch workspace e-1" },
-  { id: "workspace-next", name: "Next Workspace", description: "Switch to next workspace", category: "NAVIGATION", icon: "➡️", command: "hyprctl dispatch workspace e+1" },
+  { id: "workspace-goto", name: "Go to Workspace", description: "Switch to specific workspace", category: "NAVIGATION", icon: "WS", command: "workspace-goto" },
+  { id: "workspace-prev", name: "Previous Workspace", description: "Switch to previous workspace", category: "NAVIGATION", icon: "←", command: "hyprctl dispatch workspace e-1" },
+  { id: "workspace-next", name: "Next Workspace", description: "Switch to next workspace", category: "NAVIGATION", icon: "→", command: "hyprctl dispatch workspace e+1" },
   
-  { id: "custom-keybind", name: "Custom Keybind", description: "Press any key combination", category: "KEYBOARD", icon: "⌨️", keyCombo: "custom-keybind" },
+  { id: "custom-keybind", name: "Custom Keybind", description: "Press any key combination", category: "KEYBOARD", icon: "KEY", keyCombo: "custom-keybind" },
   
-  { id: "open-terminal", name: "Open Terminal", description: "Launch terminal", category: "OPEN", icon: "⌨️", command: "kitty" },
-  { id: "open-browser", name: "Open Browser", description: "Launch Firefox", category: "OPEN", icon: "🌐", command: "firefox" },
-  { id: "open-filemanager", name: "Open File Manager", description: "Launch Dolphin", category: "OPEN", icon: "📁", command: "dolphin" },
+  { id: "open-terminal", name: "Open Terminal", description: "Launch terminal", category: "OPEN", icon: "TTY", command: "kitty" },
+  { id: "open-browser", name: "Open Browser", description: "Launch Firefox", category: "OPEN", icon: "WWW", command: "firefox" },
+  { id: "open-filemanager", name: "Open File Manager", description: "Launch Dolphin", category: "OPEN", icon: "DIR", command: "dolphin" },
 ];
 export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfigPageProps) {
   const [activePage, setActivePage] = useState(1);
@@ -876,13 +876,21 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
                     setConfigApp(e.target.value);
                   }
                 }}
-                className="bg-transparent text-sm font-bold text-cyan-400 border-none outline-none cursor-pointer pr-2"
+                className="bg-[#0a0a0a] text-sm font-bold text-cyan-400 border border-white/5 rounded px-2 py-1 outline-none cursor-pointer hover:border-cyan-400/30 transition-colors"
+                style={{
+                  appearance: 'none',
+                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%2322d3ee' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                  backgroundPosition: 'right 0.5rem center',
+                  backgroundRepeat: 'no-repeat',
+                  backgroundSize: '1.5em 1.5em',
+                  paddingRight: '2.5rem'
+                }}
               >
-                <option value="All Apps" className="bg-[#1a1a1a] text-white">📱 All Apps (Default)</option>
+                <option value="All Apps" className="bg-[#0a0a0a] text-white">All Apps (Default)</option>
                 {savedApps.map(app => (
-                  <option key={app} value={app} className="bg-[#1a1a1a] text-white">🎯 {app}</option>
+                  <option key={app} value={app} className="bg-[#0a0a0a] text-white">{app}</option>
                 ))}
-                <option value="__add_new__" className="bg-[#1a1a1a] text-green-400">➕ Add New App...</option>
+                <option value="__add_new__" className="bg-[#0a0a0a] text-cyan-400">+ Add New App...</option>
               </select>
             </div>
             
@@ -921,8 +929,8 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
                     // Switch to "All Apps"
                     setConfigApp("All Apps");
                     
-                    console.log(`🗑️ Deleted all configurations for ${configApp}`);
-                    alert(`✅ Successfully deleted all configurations for "${configApp}"`);
+                    console.log(`Deleted all configurations for ${configApp}`);
+                    alert(`Successfully deleted all configurations for "${configApp}"`);
                   }
                 }}
                 className="p-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 hover:border-red-500/50 transition-colors"
@@ -1096,16 +1104,6 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
           </button>
         </div>
 
-        {/* Smart Create Button */}
-        <div className="px-4 pt-4 pb-3">
-          <button className="w-full bg-black/40 hover:bg-black/60 text-white font-bold py-3 px-4 rounded-lg transition-all border border-white/10 hover:border-transparent hover:shadow-[0_0_20px_rgba(168,85,247,0.4),0_0_40px_rgba(59,130,246,0.3)] hover:ring-2 hover:ring-purple-500/50 flex items-center justify-center gap-2 group">
-            <svg className="w-5 h-5 text-gray-400 group-hover:text-purple-400 transition-colors" fill="currentColor" viewBox="0 0 256 256">
-              <path d="M197.58,129.06,146,110l-19-51.62a15.92,15.92,0,0,0-29.88,0L78,110l-51.62,19a15.92,15.92,0,0,0,0,29.88L78,178l19,51.62a15.92,15.92,0,0,0,29.88,0L146,178l51.62-19a15.92,15.92,0,0,0,0-29.88ZM137,164.22a8,8,0,0,0-4.74,4.74L112,223.85,91.78,169A8,8,0,0,0,87,164.22L32.15,144,87,123.78A8,8,0,0,0,91.78,119L112,64.15,132.22,119a8,8,0,0,0,4.74,4.74L191.85,144Z"></path>
-            </svg>
-            <span className="text-sm tracking-wide text-gray-300 group-hover:text-white transition-colors">SMART CREATE</span>
-          </button>
-        </div>
-
         {/* Selected Component Indicator */}
         {selectedComponent !== null && (
           <div className="px-4 py-3 bg-cyan-400/10 border-b border-cyan-400/20">
@@ -1199,7 +1197,7 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
                           }`}
                         >
                           <div className="flex items-center gap-2 mb-1">
-                            <span className="text-base">{action.icon}</span>
+                            <span className="text-[10px] font-bold text-cyan-400 bg-cyan-400/10 px-1.5 py-0.5 rounded border border-cyan-400/20">{action.icon}</span>
                             <span className="text-xs font-bold text-white">{action.name}</span>
                             {action.rotationOnly && (
                               <span className="text-[9px] px-1.5 py-0.5 bg-purple-500/20 text-purple-300 rounded">ROTATION</span>
