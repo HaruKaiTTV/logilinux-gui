@@ -77,9 +77,12 @@ const AVAILABLE_ACTIONS: Action[] = [
   { id: "open-filemanager", name: "Open File Manager", description: "Launch Dolphin", category: "OPEN", icon: "📁", command: "dolphin" },
 ];
 export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfigPageProps) {
-  const [activeApp, setActiveApp] = useState("All Apps");
   const [activePage, setActivePage] = useState(1);
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
+  const [configApp, setConfigApp] = useState("All Apps"); // The app we're configuring
+  const [savedApps, setSavedApps] = useState<string[]>([]); // List of apps that have saved configs
+  const [showAddAppModal, setShowAddAppModal] = useState(false);
+  const [newAppName, setNewAppName] = useState("");
 
   
 
@@ -122,6 +125,22 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
 
   const isKeypad = deviceType === "CREATIVE_CONSOLE";
 
+  // Load list of apps that have configurations
+  useEffect(() => {
+    const apps = new Set<string>();
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(`button-mappings-${deviceType}-`) && !key.includes('All Apps')) {
+        // Extract app name from key like "button-mappings-CREATIVE_CONSOLE-firefox-page-1"
+        const match = key.match(/button-mappings-[^-]+-(.+)-page-\d+/);
+        if (match && match[1]) {
+          apps.add(match[1]);
+        }
+      }
+    }
+    setSavedApps(Array.from(apps).sort());
+  }, [deviceType, buttonMappings]); // Re-scan when mappings change
+
   useEffect(() => {
     dialAngleRef.current = dialAngle;
   }, [dialAngle]);
@@ -130,9 +149,23 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
     buttonMappingsRef.current = buttonMappings;
   }, [buttonMappings]);
 
+  // Load the active page for the current app when switching apps
+  useEffect(() => {
+    const savedPage = localStorage.getItem(`active-page-${configApp}`);
+    if (savedPage) {
+      const pageNum = parseInt(savedPage, 10);
+      if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= 5) {
+        setActivePage(pageNum);
+      }
+    } else {
+      // Default to page 1 if no saved page for this app
+      setActivePage(1);
+    }
+  }, [configApp]);
+
   useEffect(() => {
     isLoadingActionsRef.current = true;
-    const saved = localStorage.getItem(`button-mappings-${deviceType}-page-${activePage}`);
+    const saved = localStorage.getItem(`button-mappings-${deviceType}-${configApp}-page-${activePage}`);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -147,7 +180,7 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
     setTimeout(() => {
       isLoadingActionsRef.current = false;
     }, 0);
-  }, [deviceType, activePage]);
+  }, [deviceType, activePage, configApp]);
 
   useEffect(() => {
     // Don't save while loading from localStorage
@@ -155,15 +188,16 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
       return;
     }
     // Always save buttonMappings, even if empty (to persist clearing assignments)
-    localStorage.setItem(`button-mappings-${deviceType}-page-${activePage}`, JSON.stringify(buttonMappings));
-    console.log(`💾 Saved ${Object.keys(buttonMappings).length} button mappings for ${deviceType} page ${activePage}`);
-  }, [buttonMappings, deviceType, activePage]);
+    localStorage.setItem(`button-mappings-${deviceType}-${configApp}-page-${activePage}`, JSON.stringify(buttonMappings));
+    console.log(`💾 Saved ${Object.keys(buttonMappings).length} button mappings for ${configApp} - ${deviceType} page ${activePage}`);
+  }, [buttonMappings, deviceType, activePage, configApp]);
 
   useEffect(() => {
-    localStorage.setItem("active-page", activePage.toString());
+    // Store active page per app so each app has its own set of 5 pages
+    localStorage.setItem(`active-page-${configApp}`, activePage.toString());
     // Clear tile selection when page changes
     setSelectedTiles([]);
-  }, [activePage]);
+  }, [activePage, configApp]);
 
   // Load image library from localStorage (shared across all pages)
   useEffect(() => {
@@ -183,7 +217,7 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
     // Clear last synced state when page changes to force a fresh sync
     lastSyncedMappingsRef.current = '';
     
-    const savedMappings = localStorage.getItem(`keypad-tile-images-page-${activePage}`);
+    const savedMappings = localStorage.getItem(`keypad-tile-images-${configApp}-page-${activePage}`);
     if (savedMappings) {
       try {
         setTileImageMappings(JSON.parse(savedMappings));
@@ -197,14 +231,14 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
     setTimeout(() => {
       isLoadingMappingsRef.current = false;
     }, 0);
-  }, [activePage]);
+  }, [activePage, configApp]);
 
   // Save tile-image mappings for current page
   useEffect(() => {
     if (Object.keys(tileImageMappings).length > 0) {
-      localStorage.setItem(`keypad-tile-images-page-${activePage}`, JSON.stringify(tileImageMappings));
+      localStorage.setItem(`keypad-tile-images-${configApp}-page-${activePage}`, JSON.stringify(tileImageMappings));
     }
-  }, [tileImageMappings, activePage]);
+  }, [tileImageMappings, activePage, configApp]);
 
   // Send images to physical device when page changes or mappings change
   useEffect(() => {
@@ -279,10 +313,8 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
       setActiveButtons(prev => new Set(prev).add(event.button_code!));
       setSelectedComponent(event.button_code);
       
-      const action = buttonMappingsRef.current[event.button_code];
-      if (action) {
-        executeAction(action, true); // true = press
-      }
+      // Don't execute actions in config page - only update UI
+      // Actions will be executed by DevicesPage when not in config mode
     } else if (event.type === "ButtonRelease" && event.button_code !== undefined) {
       setActiveButtons(prev => {
         const next = new Set(prev);
@@ -290,10 +322,7 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
         return next;
       });
       
-      const action = buttonMappingsRef.current[event.button_code];
-      if (action && action.keyCombo && action.config?.allowHold) {
-        executeAction(action, false); // false = release
-      }
+      // Don't execute actions in config page
     } else if (event.type === "Rotation" && event.delta !== undefined) {
       if (event.rotation_type === "DIAL") {
         const sensitivity = dialSensitivityRef.current;
@@ -301,19 +330,13 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
         setDialAngle(prev => prev + event.delta * sensitivity);
         setTimeout(() => setDialRotation(0), 300);
         
-        const action = buttonMappingsRef.current[1000];
-        if (action && event.delta) {
-          executeRotationAction(action, event.delta);
-        }
+        // Don't execute actions in config page
       } else if (event.rotation_type === "WHEEL") {
         setWheelRotation(event.delta);
         setWheelOffset(prev => prev - event.delta * 3);
         setTimeout(() => setWheelRotation(0), 300);
         
-        const action = buttonMappingsRef.current[1001];
-        if (action && event.delta) {
-          executeRotationAction(action, event.delta);
-        }
+        // Don't execute actions in config page
       }
     }
   };
@@ -445,6 +468,49 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
 
     // Convert to JPEG and return base64
     return canvas.toDataURL('image/jpeg', 0.85);
+  };
+
+  const downscaleImage = async (base64Image: string, targetWidth: number, targetHeight: number): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        const ctx = canvas.getContext('2d');
+        
+        if (!ctx) {
+          reject(new Error('Failed to get canvas context'));
+          return;
+        }
+
+        // Draw image scaled to target dimensions
+        ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+        // Convert to base64
+        const downscaled = canvas.toDataURL('image/jpeg', 0.85);
+        resolve(downscaled);
+      };
+      img.onerror = reject;
+      img.src = base64Image;
+    });
+  };
+
+  const calculateGridDimensions = (tiles: number[]): { rows: number; cols: number } => {
+    if (tiles.length === 0) return { rows: 1, cols: 1 };
+    
+    const minTile = Math.min(...tiles);
+    const maxTile = Math.max(...tiles);
+    
+    const minRow = Math.floor(minTile / 3);
+    const minCol = minTile % 3;
+    const maxRow = Math.floor(maxTile / 3);
+    const maxCol = maxTile % 3;
+    
+    const rows = maxRow - minRow + 1;
+    const cols = maxCol - minCol + 1;
+    
+    return { rows, cols };
   };
 
   const convertImageToKeypadFormat = async (base64Image: string): Promise<string> => {
@@ -588,12 +654,27 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       const base64 = e.target?.result as string;
+      
+      // Downscale the image based on mode
+      let processedBase64 = base64;
+      if (imageMode === 'single') {
+        // Single tile: downscale to 118x118
+        processedBase64 = await downscaleImage(base64, 118, 118);
+      } else if (imageMode === 'multi' && selectedTiles.length > 0) {
+        // Multi-tile: calculate dimensions based on grid
+        const { rows, cols } = calculateGridDimensions(selectedTiles);
+        const width = cols * 118;
+        const height = rows * 118;
+        processedBase64 = await downscaleImage(base64, width, height);
+      }
+      // If multi-tile but no tiles selected yet, keep original size
+      
       const newImage: KeypadImage = {
         id: `img-${Date.now()}`,
         name: file.name,
-        base64,
+        base64: processedBase64,
         tiles: [],
         createdAt: Date.now()
       };
@@ -611,9 +692,9 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
     setImageLibrary(updatedLibrary);
     localStorage.setItem('keypad-images', JSON.stringify(updatedLibrary));
 
-    // Remove from all page mappings
+    // Remove from all page mappings for the current app
     for (let page = 1; page <= 5; page++) {
-      const mappingsKey = `keypad-tile-images-page-${page}`;
+      const mappingsKey = `keypad-tile-images-${configApp}-page-${page}`;
       const savedMappings = localStorage.getItem(mappingsKey);
       if (savedMappings) {
         try {
@@ -753,36 +834,82 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
             </svg>
           </button>
 
-          {/* App Selector */}
-          <div className="flex items-center gap-6 text-sm font-bold text-gray-500">
-            <div 
-              className={`cursor-pointer transition-colors ${activeApp === "All Apps" ? "text-cyan-400" : "hover:text-gray-300"}`}
-              onClick={() => setActiveApp("All Apps")}
-            >
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M4 6h4v4H4V6zm6 0h4v4h-4V6zm6 0h4v4h-4V6zM4 12h4v4H4v-4zm6 0h4v4h-4v-4zm6 0h4v4h-4v-4zM4 18h4v4H4v-4zm6 0h4v4h-4v-4zm6 0h4v4h-4v-4z"/>
+          {/* App Selector with Add Option */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-black/40 border border-white/10">
+              <svg className="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/>
               </svg>
-            </div>
-            <div className="flex items-center gap-4">
-              <span 
-                className={`px-2 cursor-pointer transition-colors relative ${activeApp === "Lrc" ? "text-cyan-400 app-active" : "hover:text-gray-300"}`}
-                onClick={() => setActiveApp("Lrc")}
+              <select
+                value={configApp}
+                onChange={(e) => {
+                  if (e.target.value === "__add_new__") {
+                    setShowAddAppModal(true);
+                  } else {
+                    setConfigApp(e.target.value);
+                  }
+                }}
+                className="bg-transparent text-sm font-bold text-cyan-400 border-none outline-none cursor-pointer pr-2"
               >
-                Lrc
-                {activeApp === "Lrc" && (
-                  <div className="absolute -bottom-2 left-0 w-full h-0.5 bg-cyan-400 shadow-[0_0_8px_rgb(103,232,249)]" />
-                )}
-              </span>
-              <span 
-                className={`px-2 cursor-pointer transition-colors ${activeApp === "Ps" ? "text-blue-500" : "hover:text-gray-300"}`}
-                onClick={() => setActiveApp("Ps")}
-              >
-                Ps
-              </span>
+                <option value="All Apps" className="bg-[#1a1a1a] text-white">📱 All Apps (Default)</option>
+                {savedApps.map(app => (
+                  <option key={app} value={app} className="bg-[#1a1a1a] text-white">🎯 {app}</option>
+                ))}
+                <option value="__add_new__" className="bg-[#1a1a1a] text-green-400">➕ Add New App...</option>
+              </select>
             </div>
-            <svg className="w-5 h-5 text-gray-400 cursor-pointer hover:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
+            
+            {/* Delete App Button - only show if not "All Apps" */}
+            {configApp !== "All Apps" && (
+              <button
+                onClick={() => {
+                  const confirmDelete = window.confirm(
+                    `Delete all configurations for "${configApp}"?\n\n` +
+                    `This will permanently remove:\n` +
+                    `- All button mappings (5 pages)\n` +
+                    `- All tile images (5 pages)\n` +
+                    `- Page settings\n\n` +
+                    `This action cannot be undone!`
+                  );
+                  
+                  if (confirmDelete) {
+                    // Delete all data for this app
+                    const keysToDelete: string[] = [];
+                    for (let i = 0; i < localStorage.length; i++) {
+                      const key = localStorage.key(i);
+                      if (key && (
+                        key.includes(`-${configApp}-page-`) ||
+                        key === `active-page-${configApp}`
+                      )) {
+                        keysToDelete.push(key);
+                      }
+                    }
+                    
+                    // Delete all matching keys
+                    keysToDelete.forEach(key => localStorage.removeItem(key));
+                    
+                    // Remove from saved apps list
+                    setSavedApps(prev => prev.filter(app => app !== configApp));
+                    
+                    // Switch to "All Apps"
+                    setConfigApp("All Apps");
+                    
+                    console.log(`🗑️ Deleted all configurations for ${configApp}`);
+                    alert(`✅ Successfully deleted all configurations for "${configApp}"`);
+                  }
+                }}
+                className="p-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 hover:border-red-500/50 transition-colors"
+                title={`Delete all configurations for ${configApp}`}
+              >
+                <svg className="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </button>
+            )}
+            
+            <span className="text-xs text-gray-500">
+              Configuring: <span className="text-cyan-400 font-bold">{configApp}</span>
+            </span>
           </div>
 
           {/* Spacer */}
@@ -1141,7 +1268,18 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
                 >
                   Choose Image File
                 </label>
-                <p className="text-xs text-gray-500 mt-2">Supported: PNG, JPG, GIF</p>
+                <p className="text-xs text-gray-500 mt-2">
+                  Supported: PNG, JPG, GIF
+                  {imageMode === 'single' && (
+                    <span className="block mt-1 text-cyan-400">Will be downscaled to 118×118</span>
+                  )}
+                  {imageMode === 'multi' && selectedTiles.length > 0 && (() => {
+                    const { rows, cols } = calculateGridDimensions(selectedTiles);
+                    const width = cols * 118;
+                    const height = rows * 118;
+                    return <span className="block mt-1 text-cyan-400">Will be downscaled to {width}×{height}</span>;
+                  })()}
+                </p>
               </div>
 
               {/* Image Mode Toggle */}
@@ -1186,7 +1324,7 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
                     // Clear all tile mappings
                     setTileImageMappings({});
                     // Persist the cleared mappings to localStorage
-                    localStorage.setItem(`keypad-tile-images-page-${activePage}`, JSON.stringify({}));
+                    localStorage.setItem(`keypad-tile-images-${configApp}-page-${activePage}`, JSON.stringify({}));
                     // Send blank images to all keys on device
                     const blankBase64 = createBlankImage();
                     if (blankBase64) {
@@ -1615,6 +1753,68 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
       </motion.div>
     )}
     </AnimatePresence>
+
+      {/* Add App Modal */}
+      {showAddAppModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-[#1a1a1a] border border-white/20 rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-xl font-bold text-white mb-4">Add New App Configuration</h3>
+            <p className="text-sm text-gray-400 mb-4">
+              Enter the window class name for the application you want to configure.
+            </p>
+            
+            <div className="mb-4">
+              <label className="block text-sm text-gray-300 mb-2">Window Class Name</label>
+              <input
+                type="text"
+                value={newAppName}
+                onChange={(e) => setNewAppName(e.target.value)}
+                placeholder="e.g., firefox, code, discord"
+                className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded text-white text-sm focus:outline-none focus:border-cyan-400"
+                autoFocus
+              />
+            </div>
+
+            <div className="bg-blue-500/10 border border-blue-500/30 rounded p-3 mb-4">
+              <p className="text-xs text-blue-300 mb-2 font-semibold">💡 How to find window class:</p>
+              <ul className="text-xs text-blue-200 space-y-1 list-disc list-inside">
+                <li>Run: <code className="bg-black/40 px-1 rounded">hyprctl activewindow -j | jq -r '.class'</code></li>
+                <li>Common examples: firefox, code, discord, kitty, chrome</li>
+                <li>Case-sensitive - must match exactly</li>
+              </ul>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  if (newAppName.trim()) {
+                    const trimmedName = newAppName.trim();
+                    if (!savedApps.includes(trimmedName)) {
+                      setSavedApps(prev => [...prev, trimmedName]);
+                    }
+                    setConfigApp(trimmedName);
+                    setNewAppName("");
+                    setShowAddAppModal(false);
+                  }
+                }}
+                className="flex-1 px-4 py-2 bg-cyan-500 hover:bg-cyan-600 text-white rounded font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={!newAppName.trim()}
+              >
+                Add App
+              </button>
+              <button
+                onClick={() => {
+                  setNewAppName("");
+                  setShowAddAppModal(false);
+                }}
+                className="flex-1 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded font-semibold transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1858,4 +2058,3 @@ function DialConfigView({ activeButtons, dialAngle, wheelOffset, selectedCompone
     </div>
   );
 }
-

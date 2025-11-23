@@ -2,4 +2,6 @@ pub mod actions;
 pub mod devices;
 pub mod display;
 pub mod events;
+pub mod file_ops;
 pub mod permissions;
+pub mod window;

@@ -80,6 +80,8 @@ export function DevicesPage() {
   // Image state
   const [imageLibrary, setImageLibrary] = useState<KeypadImage[]>([]);
   const [tileImageMappings, setTileImageMappings] = useState<TileImageMapping>({});
+  const [activeApp, setActiveApp] = useState("All Apps");
+  const activeAppRef = useRef("All Apps");
 
   useEffect(() => {
     dialAngleRef.current = dialAngle;
@@ -89,26 +91,218 @@ export function DevicesPage() {
     selectedDeviceRef.current = selectedDevice;
   }, [selectedDevice]);
 
+  useEffect(() => {
+    activeAppRef.current = activeApp;
+  }, [activeApp]);
+
+  // Poll for active window
+  useEffect(() => {
+    const pollActiveWindow = async () => {
+      try {
+        const window = await invoke<{ class: string; title: string }>("get_active_window");
+        // Use the window class if available, otherwise fall back to "All Apps"
+        // Only fall back if class is truly empty or undefined, not if it's a valid string
+        let appName = (window.class && window.class.trim() !== "" && window.class !== "unknown") 
+          ? window.class 
+          : "All Apps";
+        
+        // If the active window is the logilinux-gui app itself, always use "All Apps"
+        // This prevents the app from loading its own override when focused
+        if (appName.toLowerCase().includes("logilinux") || appName.toLowerCase().includes("tauri")) {
+          appName = "All Apps";
+        }
+        
+        if (appName !== activeApp) {
+          setActiveApp(appName);
+          // The useEffect watching activeApp will handle reloading
+        }
+      } catch (err) {
+        // Failed to get active window, fall back to "All Apps"
+        if (activeApp !== "All Apps") {
+          setActiveApp("All Apps");
+        }
+      }
+    };
+
+    // Poll every 500ms
+    const interval = setInterval(pollActiveWindow, 500);
+    return () => clearInterval(interval);
+  }, [activeApp]);
+
+  // Helper function to create a blank image
+  const createBlankImage = (): string => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 118;
+    canvas.height = 118;
+    const ctx = canvas.getContext('2d');
+    
+    if (!ctx) return '';
+
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, 118, 118);
+    return canvas.toDataURL('image/jpeg', 0.85);
+  };
+
+  // Helper function to convert image to keypad format
+  const convertImageToKeypadFormat = async (base64Image: string): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 118;
+        canvas.height = 118;
+        const ctx = canvas.getContext('2d');
+        
+        if (!ctx) {
+          reject(new Error('Failed to get canvas context'));
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, 118, 118);
+
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              reject(new Error('Failed to convert to JPEG'));
+              return;
+            }
+
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const result = reader.result as string;
+              const base64 = result.split(',')[1];
+              resolve(base64);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          },
+          'image/jpeg',
+          0.85
+        );
+      };
+      img.onerror = reject;
+      img.src = base64Image;
+    });
+  };
+
+  // Helper function to slice multi-tile images
+  const sliceImageForTile = async (
+    base64Image: string,
+    row: number,
+    col: number,
+    totalRows: number,
+    totalCols: number
+  ): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 118;
+        canvas.height = 118;
+        const ctx = canvas.getContext('2d');
+        
+        if (!ctx) {
+          reject(new Error('Failed to get canvas context'));
+          return;
+        }
+
+        const sourceWidth = img.width / totalCols;
+        const sourceHeight = img.height / totalRows;
+        const sourceX = col * sourceWidth;
+        const sourceY = row * sourceHeight;
+
+        ctx.drawImage(
+          img,
+          sourceX, sourceY, sourceWidth, sourceHeight,
+          0, 0, 118, 118
+        );
+
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              reject(new Error('Failed to convert to JPEG'));
+              return;
+            }
+
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const result = reader.result as string;
+              const base64 = result.split(',')[1];
+              resolve(base64);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          },
+          'image/jpeg',
+          0.85
+        );
+      };
+      img.onerror = reject;
+      img.src = base64Image;
+    });
+  };
+
+  // Send image to physical device
+  const sendImageToDevice = async (
+    keyIndex: number,
+    image: KeypadImage,
+    slicePosition?: { row: number; col: number; rows: number; cols: number }
+  ) => {
+    try {
+      let jpegBase64: string;
+      
+      if (slicePosition) {
+        jpegBase64 = await sliceImageForTile(
+          image.base64,
+          slicePosition.row,
+          slicePosition.col,
+          slicePosition.rows,
+          slicePosition.cols
+        );
+      } else {
+        jpegBase64 = await convertImageToKeypadFormat(image.base64);
+      }
+      
+      await invoke('set_key_image', {
+        keyIndex,
+        jpegBase64
+      });
+      
+      console.log(`✅ Image sent to device key ${keyIndex}`);
+    } catch (error) {
+      console.error(`Failed to send image to device key ${keyIndex}:`, error);
+    }
+  };
+
   // Load button mappings from localStorage
   const loadMappings = () => {
     const deviceTypes = ["DIALPAD", "CREATIVE_CONSOLE", "default"];
-    const activePage = parseInt(localStorage.getItem("active-page") || "1", 10);
+    const app = activeAppRef.current;
+    // Load the active page for the current app
+    const activePage = parseInt(localStorage.getItem(`active-page-${app}`) || "1", 10);
     
     for (const deviceType of deviceTypes) {
-      const storageKey = `button-mappings-${deviceType}-page-${activePage}`;
-      const saved = localStorage.getItem(storageKey);
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          buttonMappingsRef.current = parsed;
-          console.log(`📋 Loaded ${Object.keys(parsed).length} button mappings for ${deviceType} page ${activePage}`);
-          return;
-        } catch (err) {
-          console.error(`Failed to parse mappings for ${deviceType}:`, err);
+      // Try app-specific config first, then fall back to "All Apps"
+      const storageKeys = [
+        `button-mappings-${deviceType}-${app}-page-${activePage}`,
+        `button-mappings-${deviceType}-All Apps-page-${activePage}`,
+      ];
+      
+      for (const storageKey of storageKeys) {
+        const saved = localStorage.getItem(storageKey);
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            buttonMappingsRef.current = parsed;
+            console.log(`📋 Loaded ${Object.keys(parsed).length} button mappings for ${app} - ${deviceType} page ${activePage}`);
+            return;
+          } catch (err) {
+            console.error(`Failed to parse mappings for ${deviceType}:`, err);
+          }
         }
       }
     }
-    console.log(`⚠️ No button mappings found for page ${activePage}`);
+    console.log(`⚠️ No button mappings found for ${app} page ${activePage}`);
   };
 
   // Load image library and mappings
@@ -123,16 +317,130 @@ export function DevicesPage() {
       }
     }
 
-    // Load tile-image mappings for active page
-    const activePage = parseInt(localStorage.getItem("active-page") || "1", 10);
-    const savedMappings = localStorage.getItem(`keypad-tile-images-page-${activePage}`);
-    if (savedMappings) {
-      try {
-        setTileImageMappings(JSON.parse(savedMappings));
-      } catch (e) {
-        console.error('Failed to load tile-image mappings:', e);
+    // Load tile-image mappings for active page (app-specific)
+    const app = activeAppRef.current;
+    const activePage = parseInt(localStorage.getItem(`active-page-${app}`) || "1", 10);
+    
+    // Try app-specific config first, then fall back to "All Apps"
+    const storageKeys = [
+      `keypad-tile-images-${app}-page-${activePage}`,
+      `keypad-tile-images-All Apps-page-${activePage}`,
+    ];
+    
+    let loaded = false;
+    for (const storageKey of storageKeys) {
+      const savedMappings = localStorage.getItem(storageKey);
+      if (savedMappings) {
+        try {
+          setTileImageMappings(JSON.parse(savedMappings));
+          console.log(`📋 Loaded tile images from ${storageKey}`);
+          loaded = true;
+          break;
+        } catch (e) {
+          console.error('Failed to load tile-image mappings:', e);
+        }
       }
     }
+    
+    // If no config found for this app or All Apps, clear the mappings
+    if (!loaded) {
+      console.log(`⚠️ No tile image mappings found for ${app}, clearing`);
+      setTileImageMappings({});
+    }
+  };
+
+  // Export all configuration data
+  const exportConfig = async () => {
+    try {
+      const exportData: any = {
+        version: "1.0",
+        exportDate: new Date().toISOString(),
+        data: {}
+      };
+
+      // Export all localStorage data related to configurations
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (
+          key.startsWith('button-mappings-') ||
+          key.startsWith('keypad-tile-images-') ||
+          key.startsWith('keypad-images') ||
+          key.startsWith('active-page-')
+        )) {
+          const value = localStorage.getItem(key);
+          if (value) {
+            exportData.data[key] = value;
+          }
+        }
+      }
+
+      const jsonContent = JSON.stringify(exportData, null, 2);
+      const defaultFilename = `logilinux-config-${new Date().toISOString().split('T')[0]}.json`;
+      
+      // Use Tauri command to show save dialog and write file
+      await invoke('save_config_file', {
+        content: jsonContent,
+        defaultFilename: defaultFilename
+      });
+
+      console.log('✅ Configuration exported successfully');
+    } catch (error) {
+      console.error('Failed to export configuration:', error);
+      if (error !== 'User cancelled') {
+        alert('❌ Failed to export configuration');
+      }
+    }
+  };
+
+  // Import configuration data
+  const importConfig = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string;
+        const importData = JSON.parse(content);
+
+        if (!importData.version || !importData.data) {
+          alert('Invalid configuration file format');
+          return;
+        }
+
+        // Confirm before importing
+        const confirm = window.confirm(
+          `Import configuration from ${importData.exportDate || 'unknown date'}?\n\n` +
+          `This will replace ALL current configurations including:\n` +
+          `- Button mappings\n` +
+          `- Tile images\n` +
+          `- Page settings\n` +
+          `- All app-specific profiles\n\n` +
+          `This action cannot be undone!`
+        );
+
+        if (!confirm) return;
+
+        // Import all data
+        Object.entries(importData.data).forEach(([key, value]) => {
+          localStorage.setItem(key, value as string);
+        });
+
+        // Reload all data
+        loadMappings();
+        loadImageData();
+
+        alert('✅ Configuration imported successfully! Reloading...');
+        window.location.reload(); // Reload to ensure all state is fresh
+      } catch (error) {
+        console.error('Failed to import configuration:', error);
+        alert('❌ Failed to import configuration. Please check the file format.');
+      }
+    };
+    reader.readAsText(file);
+
+    // Reset the input so the same file can be imported again
+    event.target.value = '';
   };
 
   // Load mappings on mount and when devices change
@@ -140,6 +448,50 @@ export function DevicesPage() {
     loadMappings();
     loadImageData();
   }, [devices]);
+
+  // Reload mappings and images when active app changes
+  useEffect(() => {
+    loadMappings();
+    loadImageData();
+  }, [activeApp]);
+
+  // Sync images to physical device when tileImageMappings or activeApp changes
+  useEffect(() => {
+    // Only sync if we have a keypad device
+    const hasKeypad = devices.some(d => d.device_type === "CREATIVE_CONSOLE");
+    if (!hasKeypad || selectedDevice) return; // Don't sync while in config page
+    
+    const syncImagesToDevice = async () => {
+      console.log(`🔄 Syncing images to device for ${activeApp}`);
+      
+      for (let i = 0; i < 9; i++) {
+        const mapping = tileImageMappings[i];
+        if (mapping) {
+          const image = imageLibrary.find(img => img.id === mapping.imageId);
+          if (image) {
+            await sendImageToDevice(i, image, mapping.position);
+          }
+        } else {
+          // No mapping - send blank image
+          const blankBase64 = createBlankImage();
+          if (blankBase64) {
+            const blankImageObj: KeypadImage = {
+              id: `blank-${Date.now()}`,
+              name: 'blank',
+              base64: blankBase64,
+              tiles: [],
+              createdAt: Date.now()
+            };
+            await sendImageToDevice(i, blankImageObj);
+          }
+        }
+      }
+      
+      console.log(`✓ Image sync complete for ${activeApp}`);
+    };
+    
+    syncImagesToDevice();
+  }, [tileImageMappings, activeApp, devices, selectedDevice, imageLibrary]);
 
   // Reload mappings when returning from config page
   useEffect(() => {
@@ -399,7 +751,16 @@ export function DevicesPage() {
         >
           <h1 className="text-2xl font-bold tracking-wide text-white">{greeting}</h1>
 
-          <div className="flex items-center gap-6 text-xs font-bold text-gray-400 tracking-wider">
+          <div className="flex items-center gap-6">
+            {/* Active App Indicator */}
+            <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-400/10 border border-cyan-400/30">
+              <svg className="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/>
+              </svg>
+              <span className="text-sm font-bold text-cyan-400">{activeApp}</span>
+            </div>
+
+            <div className="flex items-center gap-6 text-xs font-bold text-gray-400 tracking-wider">
             <button className="hover:text-white transition-colors flex items-center gap-2">
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
                 <path d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z"></path>
@@ -416,6 +777,30 @@ export function DevicesPage() {
 
             <div className="w-[1px] h-4 bg-gray-700 mx-2"></div>
 
+            {/* Import Config Button */}
+            <label className="hover:text-white transition-colors cursor-pointer" title="Import Configuration">
+              <input
+                type="file"
+                accept=".json"
+                onChange={importConfig}
+                className="hidden"
+              />
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 256 256">
+                <path d="M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Zm-42.34-61.66a8,8,0,0,1,0,11.32l-24,24a8,8,0,0,1-11.32,0l-24-24a8,8,0,0,1,11.32-11.32L120,164.69V120a8,8,0,0,1,16,0v44.69l10.34-10.35A8,8,0,0,1,157.66,154.34Z"></path>
+              </svg>
+            </label>
+
+            {/* Export Config Button */}
+            <button 
+              onClick={exportConfig}
+              className="hover:text-white transition-colors" 
+              title="Export Configuration"
+            >
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 256 256">
+                <path d="M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Zm-42.34-77.66a8,8,0,0,1-11.32,11.32L136,139.31V184a8,8,0,0,1-16,0V139.31l-10.34,10.35a8,8,0,0,1-11.32-11.32l24-24a8,8,0,0,1,11.32,0Z"></path>
+              </svg>
+            </button>
+
             <button className="hover:text-white transition-colors">
               <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 256 256">
                 <path d="M197.58,129.06,146,110l-19-51.62a15.92,15.92,0,0,0-29.88,0L78,110l-51.62,19a15.92,15.92,0,0,0,0,29.88L78,178l19,51.62a15.92,15.92,0,0,0,29.88,0L146,178l51.62-19a15.92,15.92,0,0,0,0-29.88ZM137,164.22a8,8,0,0,0-4.74,4.74L112,223.85,91.78,169A8,8,0,0,0,87,164.22L32.15,144,87,123.78A8,8,0,0,0,91.78,119L112,64.15,132.22,119a8,8,0,0,0,4.74,4.74L191.85,144Z"></path>
@@ -429,10 +814,11 @@ export function DevicesPage() {
 
             <button className="hover:text-white transition-colors">
               <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 256 256">
-                <path d="M128,80a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Zm88-29.84q.06-2.16,0-4.32l14.92-18.64a8,8,0,0,0,1.48-7.06,107.21,107.21,0,0,0-10.88-26.25,8,8,0,0,0-6-3.93l-23.72-2.64q-1.48-1.56-3-3L186,40.54a8,8,0,0,0-3.94-6,107.71,107.71,0,0,0-26.25-10.87,8,8,0,0,0-7.06,1.49L130.16,40Q128,40,125.84,40L107.2,25.11a8,8,0,0,0-7.06-1.48A107.6,107.6,0,0,0,73.89,34.51a8,8,0,0,0-3.93,6L67.32,64.27q-1.56,1.49-3,3L40.54,70a8,8,0,0,0-6,3.94,107.71,107.71,0,0,0-10.87,26.25,8,8,0,0,0,1.49,7.06L40,125.84Q40,128,40,130.16L25.11,148.8a8,8,0,0,0-1.48,7.06,107.21,107.21,0,0,0,10.88,26.25,8,8,0,0,0,6,3.93l23.72,2.64q1.48,1.56,3,3L70,215.46a8,8,0,0,0,3.94,6,107.71,107.71,0,0,0,26.25,10.87,8,8,0,0,0,7.06-1.49L125.84,216q2.16.06,4.32,0l18.64,14.92a8,8,0,0,0,7.06,1.48,107.21,107.21,0,0,0,26.25-10.88,8,8,0,0,0,3.93-6l2.64-23.72q1.56-1.48,3-3L215.46,186a8,8,0,0,0,6-3.94,107.71,107.71,0,0,0,10.87-26.25,8,8,0,0,0-1.49-7.06Zm-16.1-6.5a73.93,73.93,0,0,1,0,8.68,8,8,0,0,0,1.74,5.48l14.19,17.73a91.57,91.57,0,0,1-6.23,15L187,173.11a8,8,0,0,0-5.1,2.64,74.11,74.11,0,0,1-6.14,6.14,8,8,0,0,0-2.64,5.1l-2.51,22.58a91.32,91.32,0,0,1-15,6.23l-17.74-14.19a8,8,0,0,0-5-1.75h-.48a73.93,73.93,0,0,1-8.68,0,8,8,0,0,0-5.48,1.74L100.45,215.8a91.57,91.57,0,0,1-15-6.23L82.89,187a8,8,0,0,0-2.64-5.1,74.11,74.11,0,0,1-6.14-6.14,8,8,0,0,0-5.1-2.64L46.43,170.6a91.32,91.32,0,0,1-6.23-15l14.19-17.74a8,8,0,0,0,1.74-5.48,73.93,73.93,0,0,1,0-8.68,8,8,0,0,0-1.74-5.48L40.2,100.45a91.57,91.57,0,0,1,6.23-15L69,82.89a8,8,0,0,0,5.1-2.64,74.11,74.11,0,0,1,6.14-6.14A8,8,0,0,0,82.89,69L85.4,46.43a91.32,91.32,0,0,1,15-6.23l17.74,14.19a8,8,0,0,0,5.48,1.74,73.93,73.93,0,0,1,8.68,0,8,8,0,0,0,5.48-1.74L155.55,40.2a91.57,91.57,0,0,1,15,6.23L173.11,69a8,8,0,0,0,2.64,5.1,74.11,74.11,0,0,1,6.14,6.14,8,8,0,0,0,5.1,2.64l22.58,2.51a91.32,91.32,0,0,1,6.23,15l-14.19,17.74A8,8,0,0,0,199.87,123.66Z"></path>
+                <path d="M128,80a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Zm88-29.84q.06-2.16,0-4.32l14.92-18.64a8,8,0,0,0,1.48-7.06,107.21,107.21,0,0,0-10.88-26.25a8,8,0,0,0-6-3.93l-23.72-2.64q-1.48-1.56-3-3L186,40.54a8,8,0,0,0-3.94-6,107.71,107.71,0,0,0-26.25-10.87,8,8,0,0,0-7.06,1.49L130.16,40Q128,40,125.84,40L107.2,25.11a8,8,0,0,0-7.06-1.48A107.6,107.6,0,0,0,73.89,34.51a8,8,0,0,0-3.93,6L67.32,64.27q-1.56,1.49-3,3L40.54,70a8,8,0,0,0-6,3.94,107.71,107.71,0,0,0-10.87,26.25,8,8,0,0,0,1.49,7.06L40,125.84Q40,128,40,130.16L25.11,148.8a8,8,0,0,0-1.48,7.06,107.21,107.21,0,0,0,10.88,26.25,8,8,0,0,0,6,3.93l23.72,2.64q1.48,1.56,3,3L70,215.46a8,8,0,0,0,3.94,6,107.71,107.71,0,0,0,26.25,10.87,8,8,0,0,0,7.06-1.49L125.84,216q2.16.06,4.32,0l18.64,14.92a8,8,0,0,0,7.06,1.48,107.21,107.21,0,0,0,26.25-10.88,8,8,0,0,0,3.93-6l2.64-23.72q1.56-1.48,3-3L215.46,186a8,8,0,0,0,6-3.94,107.71,107.71,0,0,0,10.87-26.25,8,8,0,0,0-1.49-7.06Zm-16.1-6.5a73.93,73.93,0,0,1,0,8.68,8,8,0,0,0,1.74,5.48l14.19,17.73a91.57,91.57,0,0,1-6.23,15L187,173.11a8,8,0,0,0-5.1,2.64,74.11,74.11,0,0,1-6.14,6.14,8,8,0,0,0-2.64,5.1l-2.51,22.58a91.32,91.32,0,0,1-15,6.23l-17.74-14.19a8,8,0,0,0-5-1.75h-.48a73.93,73.93,0,0,1-8.68,0,8,8,0,0,0-5.48,1.74L100.45,215.8a91.57,91.57,0,0,1-15-6.23L82.89,187a8,8,0,0,0-2.64-5.1,74.11,74.11,0,0,1-6.14-6.14,8,8,0,0,0-5.1-2.64L46.43,170.6a91.32,91.32,0,0,1-6.23-15l14.19-17.74a8,8,0,0,0,1.74-5.48,73.93,73.93,0,0,1,0-8.68,8,8,0,0,0-1.74-5.48L40.2,100.45a91.57,91.57,0,0,1,6.23-15L69,82.89a8,8,0,0,0,5.1-2.64,74.11,74.11,0,0,1,6.14-6.14A8,8,0,0,0,82.89,69L85.4,46.43a91.32,91.32,0,0,1,15-6.23l17.74,14.19a8,8,0,0,0,5.48,1.74,73.93,73.93,0,0,1,8.68,0,8,8,0,0,0,5.48-1.74L155.55,40.2a91.57,91.57,0,0,1,15,6.23L173.11,69a8,8,0,0,0,2.64,5.1,74.11,74.11,0,0,1,6.14,6.14,8,8,0,0,0,5.1,2.64l22.58,2.51a91.32,91.32,0,0,1,6.23,15l-14.19,17.74A8,8,0,0,0,199.87,123.66Z"></path>
               </svg>
             </button>
-          </div>
+            </div>
+            </div>
         </motion.header>
 
         {/* Content Area */}
@@ -464,6 +850,8 @@ export function DevicesPage() {
                     wheelRotation={wheelRotation}
                     wheelOffset={wheelOffset}
                     dialAngle={dialAngle}
+                    tileImageMappings={tileImageMappings}
+                    imageLibrary={imageLibrary}
                     onClick={() => setSelectedDevice(device)}
                   />
                 </motion.div>
