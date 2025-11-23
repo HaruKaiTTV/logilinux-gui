@@ -16,10 +16,11 @@ interface DeviceInfo {
 }
 
 interface DeviceEvent {
-  type: "ButtonPress" | "ButtonRelease" | "Rotation";
+  type: "ButtonPress" | "ButtonRelease" | "Rotation" | "DeviceConnected" | "DeviceDisconnected";
   button_code?: number;
   delta?: number;
   rotation_type?: string;
+  device_path?: string;
 }
 
 interface Action {
@@ -79,6 +80,8 @@ export function DevicesPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dialSensitivityRef = useRef(dialSensitivity);
   const buttonMappingsRef = useRef<ButtonMapping>({});
+  const keypadMappingsRef = useRef<ButtonMapping>({});
+  const dialpadMappingsRef = useRef<ButtonMapping>({});
   const dialAngleRef = useRef(0);
   const selectedDeviceRef = useRef<DeviceInfo | null>(null);
 
@@ -313,57 +316,65 @@ export function DevicesPage() {
     
     console.log(`📥 Loading mappings for app: "${app}", page: ${activePage}`);
     
-    // Determine device types to try based on connected devices
-    let deviceTypesToTry: string[] = [];
-    
     // Check what devices are connected
     const hasKeypad = devices.some(d => d.device_type === "CREATIVE_CONSOLE");
     const hasDialpad = devices.some(d => d.device_type === "DIALPAD");
     
-    // Prioritize the actually connected device type
+    // Load mappings for each connected device type
     if (hasKeypad) {
-      deviceTypesToTry.push("CREATIVE_CONSOLE");
-    }
-    if (hasDialpad) {
-      deviceTypesToTry.push("DIALPAD");
-    }
-    
-    // Add fallback device types
-    deviceTypesToTry.push("default");
-    
-    // Also try the other types if nothing found yet (for backwards compatibility)
-    if (!hasKeypad) deviceTypesToTry.push("CREATIVE_CONSOLE");
-    if (!hasDialpad) deviceTypesToTry.push("DIALPAD");
-    
-    console.log(`  🎯 Device types to try (in order):`, deviceTypesToTry);
-    
-    for (const deviceType of deviceTypesToTry) {
-      // Try app-specific config first, then fall back to "All Apps"
       const storageKeys = [
-        `button-mappings-${deviceType}-${app}-page-${activePage}`,
-        `button-mappings-${deviceType}-All Apps-page-${activePage}`,
+        `button-mappings-CREATIVE_CONSOLE-${app}-page-${activePage}`,
+        `button-mappings-CREATIVE_CONSOLE-All Apps-page-${activePage}`,
       ];
       
-      console.log(`  🔍 Trying device type: ${deviceType}`);
-      
+      console.log(`  🎹 Loading keypad mappings...`);
       for (const storageKey of storageKeys) {
-        console.log(`    🔑 Checking key: ${storageKey}`);
         const saved = localStorage.getItem(storageKey);
         if (saved) {
           try {
             const parsed = JSON.parse(saved);
-            buttonMappingsRef.current = parsed;
-            console.log(`    ✅ Loaded ${Object.keys(parsed).length} button mappings from ${storageKey}`);
-            console.log(`    📋 Mappings:`, parsed);
-            return;
+            keypadMappingsRef.current = parsed;
+            console.log(`    ✅ Loaded ${Object.keys(parsed).length} keypad mappings from ${storageKey}`);
+            break;
           } catch (err) {
-            console.error(`Failed to parse mappings for ${deviceType}:`, err);
+            console.error(`Failed to parse keypad mappings:`, err);
           }
         }
       }
     }
-    console.log(`⚠️ No button mappings found for ${app} page ${activePage}`);
-    buttonMappingsRef.current = {};
+    
+    if (hasDialpad) {
+      const storageKeys = [
+        `button-mappings-DIALPAD-${app}-page-${activePage}`,
+        `button-mappings-DIALPAD-All Apps-page-${activePage}`,
+      ];
+      
+      console.log(`  🎛️ Loading dialpad mappings...`);
+      for (const storageKey of storageKeys) {
+        const saved = localStorage.getItem(storageKey);
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            dialpadMappingsRef.current = parsed;
+            console.log(`    ✅ Loaded ${Object.keys(parsed).length} dialpad mappings from ${storageKey}`);
+            break;
+          } catch (err) {
+            console.error(`Failed to parse dialpad mappings:`, err);
+          }
+        }
+      }
+    }
+    
+    // For backwards compatibility, still populate buttonMappingsRef with priority device
+    if (hasKeypad && Object.keys(keypadMappingsRef.current).length > 0) {
+      buttonMappingsRef.current = keypadMappingsRef.current;
+    } else if (hasDialpad && Object.keys(dialpadMappingsRef.current).length > 0) {
+      buttonMappingsRef.current = dialpadMappingsRef.current;
+    } else {
+      buttonMappingsRef.current = {};
+    }
+    
+    console.log(`📋 Final mappings - Keypad:`, Object.keys(keypadMappingsRef.current).length, `Dialpad:`, Object.keys(dialpadMappingsRef.current).length);
   };
 
   // Load image library and mappings
@@ -641,8 +652,29 @@ export function DevicesPage() {
     };
   }, []);
 
-  const handleDeviceEvent = (event: DeviceEvent) => {
+  const handleDeviceEvent = async (event: DeviceEvent) => {
     console.log('🎮 Device event received:', event);
+    
+    // Handle device connection/disconnection
+    if (event.type === "DeviceConnected") {
+      console.log('🔌 Device connected, reloading mappings...');
+      console.log('📋 Current mappings before reload:', buttonMappingsRef.current);
+      // Reload device list and wait for it
+      await discoverDevices();
+      // Small delay to ensure state updates
+      await new Promise(resolve => setTimeout(resolve, 100));
+      // Now reload button mappings and images with updated device list
+      loadMappings();
+      loadImageData();
+      console.log('📋 Current mappings after reload:', buttonMappingsRef.current);
+      return;
+    }
+    
+    if (event.type === "DeviceDisconnected") {
+      console.log('🔌 Device disconnected');
+      await discoverDevices();
+      return;
+    }
     
     // Don't execute actions if we're in the config page (selectedDevice is set)
     // The config page has its own event listener
@@ -654,14 +686,23 @@ export function DevicesPage() {
     if (event.type === "ButtonPress" && event.button_code !== undefined) {
       setActiveButtons(prev => new Set(prev).add(event.button_code!));
       
-      const action = buttonMappingsRef.current[event.button_code];
-      console.log(`🔍 Button ${event.button_code} pressed, action:`, action);
+      // Determine which device this event is from based on button code
+      let action;
+      if (event.button_code >= 0 && event.button_code <= 8 || event.button_code === 0xa1 || event.button_code === 0xa2) {
+        // Keypad buttons (0-8 for grid, 0xa1 and 0xa2 for arrows)
+        action = keypadMappingsRef.current[event.button_code];
+        console.log(`🎹 Keypad button ${event.button_code} pressed, action:`, action);
+      } else {
+        // Dialpad buttons (275-278 for corners, 1000 for dial, 1001 for wheel)
+        action = dialpadMappingsRef.current[event.button_code];
+        console.log(`🎛️ Dialpad button ${event.button_code} pressed, action:`, action);
+      }
+      
       if (action) {
         console.log(`▶️  Executing action:`, action.name);
         executeAction(action, true); // true = press
       } else {
         console.log(`⚠️  No action mapped for button ${event.button_code}`);
-        console.log('📋 Current mappings:', buttonMappingsRef.current);
       }
     } else if (event.type === "ButtonRelease" && event.button_code !== undefined) {
       setActiveButtons(prev => {
@@ -671,7 +712,13 @@ export function DevicesPage() {
       });
       
       // Handle key release for hold actions
-      const action = buttonMappingsRef.current[event.button_code];
+      let action;
+      if (event.button_code >= 0 && event.button_code <= 8 || event.button_code === 0xa1 || event.button_code === 0xa2) {
+        action = keypadMappingsRef.current[event.button_code];
+      } else {
+        action = dialpadMappingsRef.current[event.button_code];
+      }
+      
       if (action && action.keyCombo && action.config?.allowHold) {
         executeAction(action, false); // false = release
       }
@@ -683,7 +730,9 @@ export function DevicesPage() {
         setDialAngle(prev => prev + event.delta * sensitivity);
         setTimeout(() => setDialRotation(0), 300);
         
-        const action = buttonMappingsRef.current[1000];
+        // Dial rotation is button 1000 on the dialpad
+        const action = dialpadMappingsRef.current[1000];
+        console.log(`🎛️ Dial rotated (delta: ${event.delta}), action:`, action);
         if (action && event.delta) {
           executeRotationAction(action, event.delta);
         }
@@ -692,7 +741,9 @@ export function DevicesPage() {
         setWheelOffset(prev => prev - event.delta * 3);
         setTimeout(() => setWheelRotation(0), 300);
         
-        const action = buttonMappingsRef.current[1001];
+        // Wheel rotation is button 1001 on the dialpad
+        const action = dialpadMappingsRef.current[1001];
+        console.log(`🎛️ Wheel rotated (delta: ${event.delta}), action:`, action);
         if (action && event.delta) {
           executeRotationAction(action, event.delta);
         }
