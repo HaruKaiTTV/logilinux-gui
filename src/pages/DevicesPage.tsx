@@ -616,6 +616,7 @@ function KeypadDevice({ activeButtons, tileImageMappings, imageLibrary }: {
   
   // Helper function to get image for a tile
   const getTileImage = (tileIndex: number) => {
+    if (!tileImageMappings) return null;
     const mapping = tileImageMappings[tileIndex];
     if (!mapping) return null;
     const image = imageLibrary.find(img => img.id === mapping.imageId);
