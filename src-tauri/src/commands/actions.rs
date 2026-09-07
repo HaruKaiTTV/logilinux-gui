@@ -1,9 +1,22 @@
 use std::env;
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 use tauri::command;
 
 fn convert_to_ydotool_keys(combo: &str) -> Result<String, String> {
-    let parts: Vec<&str> = combo.split('+').collect();
+    let normalized = combo.to_lowercase();
+    let mut parts: Vec<&str> = normalized.split('+').map(str::trim).collect();
+    let modifier_names = ["ctrl", "shift", "alt", "super"];
+    if parts.iter().filter(|part| !modifier_names.contains(part)).count() > 1 {
+        let mut sequence = Vec::new();
+        for part in parts {
+            let code = get_key_code(part)?;
+            sequence.push(format!("{}:1", code));
+            sequence.push(format!("{}:0", code));
+        }
+        return Ok(sequence.join(" "));
+    }
+    parts.sort_by_key(|part| !modifier_names.contains(part));
     let mut key_codes = Vec::new();
 
     for part in &parts[..parts.len() - 1] {
@@ -37,8 +50,25 @@ fn convert_to_ydotool_keys(combo: &str) -> Result<String, String> {
     Ok(key_codes.join(" "))
 }
 
+fn sequence_text(combo: &str) -> Option<String> {
+    let modifiers = ["ctrl", "shift", "alt", "super"];
+    let mut text = String::new();
+    let mut has_text = false;
+    for part in combo.split('+').map(str::trim) {
+        if modifiers.contains(&part.to_lowercase().as_str()) { continue; }
+        if part.eq_ignore_ascii_case("space") { text.push(' '); has_text = true; continue; }
+        if part.chars().count() != 1 { return None; }
+        text.push_str(part);
+        has_text = true;
+    }
+    has_text.then_some(text)
+}
+
 fn convert_to_ydotool_keys_hold(combo: &str, press: bool) -> Result<String, String> {
-    let parts: Vec<&str> = combo.split('+').collect();
+    let normalized = combo.to_lowercase();
+    let mut parts: Vec<&str> = normalized.split('+').map(str::trim).collect();
+    let modifier_names = ["ctrl", "shift", "alt", "super"];
+    parts.sort_by_key(|part| !modifier_names.contains(part));
     let mut key_codes = Vec::new();
 
     if press {
@@ -80,6 +110,7 @@ fn convert_to_ydotool_keys_hold(combo: &str, press: bool) -> Result<String, Stri
 
 fn get_key_code(key: &str) -> Result<&'static str, String> {
     match key {
+        "ctrl" => Ok("29"), "shift" => Ok("42"), "alt" => Ok("56"), "super" => Ok("125"),
         "a" => Ok("30"),
         "b" => Ok("48"),
         "c" => Ok("46"),
@@ -162,13 +193,17 @@ fn get_key_code(key: &str) -> Result<&'static str, String> {
 }
 
 #[command]
-pub async fn execute_key_combo(combo: String, hold: bool, press: bool) -> Result<(), String> {
-    let ydotool_keys = if hold {
-        convert_to_ydotool_keys_hold(&combo, press)?
-    } else {
-        convert_to_ydotool_keys(&combo)?
-    };
-
+pub async fn execute_key_combo(combo: String, _mode: Option<String>, hold: bool, press: bool) -> Result<(), String> {
+    static KEYBOARD_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let _keyboard_guard = KEYBOARD_LOCK.get_or_init(|| Mutex::new(())).lock()
+        .map_err(|_| "Keyboard input lock was poisoned".to_string())?;
+    let ydotool_path = "/usr/bin/ydotool";
+    eprintln!("Executing ydotool key combo: {combo} (hold={hold}, press={press})");
+    // Literal character macros are always typing macros. This also repairs
+    // older saved macros whose mode marker was absent or incorrect.
+    let text_value = if !hold && press { sequence_text(&combo) } else { None };
+    let text_sequence = text_value.is_some();
+    eprintln!("Macro classification: text_sequence={text_sequence}, text={text_value:?}");
     let sudo_user = env::var("SUDO_USER").ok();
     let sudo_uid = env::var("SUDO_UID").ok();
     let ydotool_socket = env::var("YDOTOOL_SOCKET").unwrap_or_else(|_| {
@@ -179,6 +214,21 @@ pub async fn execute_key_combo(combo: String, hold: bool, press: bool) -> Result
         }
     });
 
+    if text_sequence {
+        let text = text_value.as_ref().unwrap();
+        let mut cmd = Command::new(ydotool_path);
+        cmd.env("YDOTOOL_SOCKET", &ydotool_socket).arg("type").arg(text);
+        cmd.spawn().map_err(|e| format!("Failed to start ydotool typing: {e}"))?;
+        eprintln!("ydotool typing command started asynchronously");
+        return Ok(());
+    }
+
+    let ydotool_keys = if hold {
+        convert_to_ydotool_keys_hold(&combo, press)?
+    } else {
+        convert_to_ydotool_keys(&combo)?
+    };
+
     let output = if let (Some(user), Some(_uid)) = (sudo_user, sudo_uid) {
         let home_dir = format!("/home/{}", user);
 
@@ -188,20 +238,32 @@ pub async fn execute_key_combo(combo: String, hold: bool, press: bool) -> Result
             .arg(format!("HOME={}", home_dir))
             .arg(format!("YDOTOOL_SOCKET={}", ydotool_socket));
 
-        let mut ydotool_cmd = cmd.arg("ydotool").arg("key");
-        for key_code in ydotool_keys.split_whitespace() {
-            ydotool_cmd = ydotool_cmd.arg(key_code);
+        let mut ydotool_cmd = cmd.arg(ydotool_path);
+        if text_sequence {
+            ydotool_cmd = ydotool_cmd.arg("type").arg(text_value.as_ref().unwrap());
+        } else {
+            ydotool_cmd = ydotool_cmd.arg("key").arg("--key-delay").arg("20");
+            for key_code in ydotool_keys.split_whitespace() {
+                ydotool_cmd = ydotool_cmd.arg(key_code);
+            }
         }
 
         ydotool_cmd
             .output()
             .map_err(|e| format!("Failed to execute ydotool: {}", e))?
     } else {
-        let mut cmd = Command::new("ydotool");
+        let mut cmd = Command::new(ydotool_path);
         cmd.env("YDOTOOL_SOCKET", &ydotool_socket);
-        cmd.arg("key");
-        for key_code in ydotool_keys.split_whitespace() {
-            cmd.arg(key_code);
+        if text_sequence {
+            cmd.arg("type").arg(text_value.as_ref().unwrap());
+        } else {
+            cmd.arg("key");
+        }
+        if !text_sequence {
+            cmd.arg("--key-delay").arg("20");
+            for key_code in ydotool_keys.split_whitespace() {
+                cmd.arg(key_code);
+            }
         }
 
         cmd.output()
@@ -211,11 +273,14 @@ pub async fn execute_key_combo(combo: String, hold: bool, press: bool) -> Result
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
+        eprintln!("ydotool command failed: stderr={stderr}, stdout={stdout}, status={}", output.status);
         return Err(format!(
             "ydotool failed - stderr: {}, stdout: {}",
             stderr, stdout
         ));
     }
+
+    eprintln!("ydotool command completed successfully");
 
     Ok(())
 }

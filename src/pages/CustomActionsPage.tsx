@@ -9,7 +9,7 @@ interface PythonPlugin {
   isRunning: boolean;
 }
 
-export function CustomActionsPage({ onBack }: { onBack: () => void }) {
+export function CustomActionsPage() {
   const [plugins, setPlugins] = useState<PythonPlugin[]>([]);
   const [selectedPlugin, setSelectedPlugin] = useState<PythonPlugin | null>(null);
   const [output, setOutput] = useState<string>("");

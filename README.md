@@ -76,7 +76,7 @@ npm install -g pnpm
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/logilinux/logilinux-gui.git
+git clone https://github.com/HaruKaiTTV/logilinux-gui.git
 cd logilinux-gui
 ```
 
@@ -316,7 +316,7 @@ GPL v3
 
 ## Acknowledgments
 
-- Built on top of [logilinux](https://github.com/logilinux/logilinux) - The core C++ library for Logitech device communication
+- Built on top of [logilinux](https://github.com/HaruKaiTTV/logilinux) - The core C++ library for Logitech device communication
 - Powered by [Tauri](https://tauri.app/) - Rust-based desktop app framework
 - UI inspired by Logitech Options+ design language
 - Uses [shadcn/ui](https://ui.shadcn.com/) components

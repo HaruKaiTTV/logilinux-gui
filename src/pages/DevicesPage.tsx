@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef, memo, useCallback } from "react";
+import { useState, useEffect, useRef, memo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { motion, AnimatePresence } from "framer-motion";
 import { DeviceConfigPage } from "./DeviceConfigPage";
 import { CustomActionsPage } from "./CustomActionsPage";
 import logiLogo from "../assets/logilogo.svg";
+import { WindowControls } from "../components/WindowControls";
 
 interface DeviceInfo {
   id: string;
@@ -21,6 +22,7 @@ interface DeviceEvent {
   delta?: number;
   rotation_type?: string;
   device_path?: string;
+  device_type?: "DIALPAD" | "CREATIVE_CONSOLE";
 }
 
 interface Action {
@@ -43,6 +45,7 @@ interface Action {
     keyCombo?: string;
     allowHold?: boolean;
     customCommand?: string;
+    keyComboMode?: "chord" | "sequence";
   };
 }
 
@@ -72,7 +75,7 @@ export function DevicesPage() {
   const [wheelRotation, setWheelRotation] = useState(0);
   const [wheelOffset, setWheelOffset] = useState(0);
   const [dialAngle, setDialAngle] = useState(0);
-  const [dialSensitivity, setDialSensitivity] = useState(1);
+  const [dialSensitivity] = useState(1);
   const [selectedDevice, setSelectedDevice] = useState<DeviceInfo | null>(null);
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
   const [showCustomActions, setShowCustomActions] = useState(false);
@@ -84,6 +87,7 @@ export function DevicesPage() {
   const dialpadMappingsRef = useRef<ButtonMapping>({});
   const dialAngleRef = useRef(0);
   const selectedDeviceRef = useRef<DeviceInfo | null>(null);
+  const actionsReadyRef = useRef(false);
 
   // Image state
   const [imageLibrary, setImageLibrary] = useState<KeypadImage[]>([]);
@@ -93,6 +97,7 @@ export function DevicesPage() {
   const appSwitchDebounceRef = useRef<number | null>(null);
   const blankImageCacheRef = useRef<string | null>(null);
   const lastSyncedMappingsRef = useRef<string>("");  // Track last synced state as JSON string
+  const imageSyncQueueRef = useRef<Promise<void>>(Promise.resolve());
   
   // Throttle rotation updates for performance
   const rotationFrameRef = useRef<number | null>(null);
@@ -105,6 +110,12 @@ export function DevicesPage() {
 
   useEffect(() => {
     selectedDeviceRef.current = selectedDevice;
+    actionsReadyRef.current = false;
+    const resumeTimer = window.setTimeout(() => {
+      actionsReadyRef.current = true;
+    }, selectedDevice ? 0 : 5000);
+
+    return () => clearTimeout(resumeTimer);
   }, [selectedDevice]);
 
   useEffect(() => {
@@ -391,6 +402,36 @@ export function DevicesPage() {
     console.log(`📋 Final mappings - Keypad:`, Object.keys(keypadMappingsRef.current).length, `Dialpad:`, Object.keys(dialpadMappingsRef.current).length);
   };
 
+  const switchMacroPadPage = (direction: "next" | "previous") => {
+    const currentPage = parseInt(localStorage.getItem(`active-page-${activeAppRef.current}`) || "1", 10);
+    const nextPage = direction === "next"
+      ? (currentPage >= 5 ? 1 : currentPage + 1)
+      : (currentPage <= 1 ? 5 : currentPage - 1);
+
+    localStorage.setItem(`active-page-${activeAppRef.current}`, String(nextPage));
+
+    const blankBase64 = createBlankImage();
+    if (blankBase64) {
+      const blankImage: KeypadImage = {
+        id: `blank-page-${Date.now()}`,
+        name: "blank",
+        base64: blankBase64,
+        tiles: [],
+        createdAt: Date.now(),
+      };
+      imageSyncQueueRef.current = imageSyncQueueRef.current.then(async () => {
+        for (let i = 0; i < 9; i++) {
+          await sendImageToDevice(i, blankImage);
+        }
+      });
+    }
+
+    setTileImageMappings({});
+    lastSyncedMappingsRef.current = JSON.stringify({});
+    loadMappings();
+    loadImageData();
+  };
+
   // Load image library and mappings
   const loadImageData = () => {
     // Load image library (shared across all pages)
@@ -612,7 +653,9 @@ export function DevicesPage() {
       console.log(`✓ Image sync complete for ${activeApp}`);
     };
     
-    syncImagesToDevice();
+    imageSyncQueueRef.current = imageSyncQueueRef.current
+      .then(syncImagesToDevice)
+      .catch(error => console.error("Image synchronization failed:", error));
   }, [tileImageMappings, activeApp, devices, selectedDevice, imageLibrary]);
 
   // Reload mappings when returning from config page
@@ -638,7 +681,6 @@ export function DevicesPage() {
 
   useEffect(() => {
     console.log('🚀 DevicesPage mounting - registering event listener');
-    
     // Initial load of mappings and images
     loadMappings();
     loadImageData();
@@ -702,7 +744,9 @@ export function DevicesPage() {
       
       // Determine which device this event is from based on button code
       let action;
-      if (event.button_code >= 0 && event.button_code <= 8 || event.button_code === 0xa1 || event.button_code === 0xa2) {
+      const isKeypadEvent = event.device_type === "CREATIVE_CONSOLE" ||
+        (event.device_type === undefined && (event.button_code >= 0 && event.button_code <= 8 || event.button_code === 0xa1 || event.button_code === 0xa2));
+      if (isKeypadEvent) {
         // Keypad buttons (0-8 for grid, 0xa1 and 0xa2 for arrows)
         action = keypadMappingsRef.current[event.button_code];
         console.log(`🎹 Keypad button ${event.button_code} pressed, action:`, action);
@@ -714,7 +758,11 @@ export function DevicesPage() {
       
       if (action) {
         console.log(`▶️  Executing action:`, action.name);
-        executeAction(action, true); // true = press
+        if (actionsReadyRef.current) {
+          executeAction(action, true); // true = press
+        } else {
+          console.log('⏸️ Ignoring startup button event');
+        }
       } else {
         console.log(`⚠️  No action mapped for button ${event.button_code}`);
       }
@@ -727,14 +775,18 @@ export function DevicesPage() {
       
       // Handle key release for hold actions
       let action;
-      if (event.button_code >= 0 && event.button_code <= 8 || event.button_code === 0xa1 || event.button_code === 0xa2) {
+      const isKeypadEvent = event.device_type === "CREATIVE_CONSOLE" ||
+        (event.device_type === undefined && (event.button_code >= 0 && event.button_code <= 8 || event.button_code === 0xa1 || event.button_code === 0xa2));
+      if (isKeypadEvent) {
         action = keypadMappingsRef.current[event.button_code];
       } else {
         action = dialpadMappingsRef.current[event.button_code];
       }
       
       if (action && action.keyCombo && action.config?.allowHold) {
-        executeAction(action, false); // false = release
+        if (actionsReadyRef.current) {
+          executeAction(action, false); // false = release
+        }
       }
     } else if (event.type === "Rotation" && event.delta !== undefined) {
       
@@ -786,20 +838,22 @@ export function DevicesPage() {
   };
 
   const executeAction = async (action: Action, isPress: boolean = true) => {
-    if (action.keyCombo) {
-      if (action.keyCombo === "custom-keybind" && action.config?.keyCombo) {
+    if (action.keyCombo || action.id.startsWith("custom-keybind-") || action.config?.keyCombo) {
+      if (action.config?.keyCombo && (action.keyCombo === "custom-keybind" || action.id.startsWith("custom-keybind-") || action.category === "KEYBOARD")) {
         // Execute the custom keybind from config
         const allowHold = action.config.allowHold ?? false;
         try {
+          console.log("Executing keybind macro:", action.name, action.config.keyCombo);
           await invoke("execute_key_combo", { 
             combo: action.config.keyCombo,
+            mode: action.config.keyComboMode,
             hold: allowHold,
             press: isPress
           });
         } catch (err) {
-          // Failed
+          console.error("Failed to execute custom keybind", action.name, action.config.keyCombo, err);
         }
-      } else if (action.keyCombo !== "custom-keybind") {
+      } else if (action.keyCombo && action.keyCombo !== "custom-keybind") {
         // Execute predefined keybind (always press+release together)
         try {
           await invoke("execute_key_combo", { 
@@ -812,7 +866,11 @@ export function DevicesPage() {
         }
       }
     } else if (action.command) {
-      if (action.command === "workspace-goto") {
+      if (action.command === "macro-page-next") {
+        switchMacroPadPage("next");
+      } else if (action.command === "macro-page-prev") {
+        switchMacroPadPage("previous");
+      } else if (action.command === "workspace-goto") {
         // Handle workspace goto with config
         const workspaceNum = action.config?.workspaceNumber ?? 1;
         const command = `hyprctl dispatch workspace ${workspaceNum}`;
@@ -941,7 +999,6 @@ export function DevicesPage() {
           transition={{ duration: 0.1 }}
         >
           <DeviceConfigPage
-            deviceName={selectedDevice.name}
             deviceType={selectedDevice.device_type}
             onBack={() => setSelectedDevice(null)}
           />
@@ -969,11 +1026,12 @@ export function DevicesPage() {
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: -20, opacity: 0 }}
           transition={{ duration: 0.1 }}
-          className="h-20 flex items-center justify-between px-8 border-b border-white/5"
+          className="h-20 grid grid-cols-[1fr_auto_1fr] items-center px-8 border-b border-white/5 relative"
         >
-          <img src={logiLogo} alt="LogiLinux" className="h-8" />
+          <div data-tauri-drag-region className="absolute inset-0 z-0" />
+          <img src={logiLogo} alt="LogiLinux" className="h-8 z-10" />
 
-          <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-6">
+          <div className="flex items-center justify-center gap-6 z-10">
             <div className="flex items-center gap-6 text-xs font-bold text-gray-400 tracking-wider">
             <button 
               onClick={() => setShowCustomActions(false)}
@@ -985,16 +1043,9 @@ export function DevicesPage() {
               ALL APPS
             </button>
 
-            <button className="hover:text-white transition-colors flex items-center gap-2">
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
-                <path d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z"></path>
-              </svg>
-              ADD DEVICE
-            </button>
-
             <button 
               onClick={() => setShowCustomActions(true)}
-              className={`transition-colors flex items-center gap-2 ${showCustomActions ? 'text-white' : 'hover:text-white'}`}
+              className={`hidden transition-colors items-center gap-2 ${showCustomActions ? 'text-white' : 'hover:text-white'}`}
             >
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
                 <path d="M224.83,114.78l-26.26-26.26a1.42,1.42,0,0,0-.1-.11l-18.31-18.3A44.07,44.07,0,0,0,118,32h-2a44.08,44.08,0,0,0-43.8,40H56a16,16,0,0,0-16,16v32a8,8,0,0,0,16,0V88h56v80H56v-8a8,8,0,0,0-16,0v8a16,16,0,0,0,16,16h16.2A44.08,44.08,0,0,0,116,224h2a44.07,44.07,0,0,0,62.16-38.11l18.31-18.31a1.42,1.42,0,0,0,.11-.1l26.26-26.26A16,16,0,0,0,224.83,114.78ZM116,208a28,28,0,0,1,0-56h2a28,28,0,0,1,19.6,8l-28.95,28.94A8,8,0,0,0,120,200a28.06,28.06,0,0,1-4,8Zm2-136a28.08,28.08,0,0,1,27.71,24H120a8,8,0,0,0,0,16h26.88A28.11,28.11,0,0,1,135.3,131.3L116,112.69V96h2a28,28,0,0,1,0,56h-2a28,28,0,0,1-2.31-.12L125.89,139.7a8,8,0,0,0-11.31,0l-13.89,13.89A43.83,43.83,0,0,0,116,208h2a27.87,27.87,0,0,1-19.6-8l28.95-28.94A8,8,0,0,0,136,160a28.06,28.06,0,0,1,4-8Zm82.41,52.68-21.65,21.65L159.88,127.46l21.65-21.65Z"></path>
@@ -1004,7 +1055,7 @@ export function DevicesPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-6 text-xs font-bold text-gray-400 tracking-wider">
+          <div className="flex items-center justify-end gap-3 text-xs font-bold text-gray-400 tracking-wider z-10">
             <div className="w-[1px] h-4 bg-gray-700 mx-2"></div>
 
             {/* Profile Button with Dropdown */}
@@ -1054,25 +1105,12 @@ export function DevicesPage() {
                           Export
                         </button>
                       </div>
-                      <div className="border-t border-white/5 my-1"></div>
-                      <button className="w-full px-4 py-2.5 text-left text-sm text-gray-400 hover:bg-white/5 hover:text-gray-200 transition-colors">
-                        General Settings
-                      </button>
-                      <button className="w-full px-4 py-2.5 text-left text-sm text-gray-400 hover:bg-white/5 hover:text-gray-200 transition-colors">
-                        Appearance
-                      </button>
-                      <button className="w-full px-4 py-2.5 text-left text-sm text-gray-400 hover:bg-white/5 hover:text-gray-200 transition-colors">
-                        Notifications
-                      </button>
-                      <div className="border-t border-white/5 my-1"></div>
-                      <button className="w-full px-4 py-2.5 text-left text-sm text-gray-400 hover:bg-white/5 hover:text-gray-200 transition-colors">
-                        About
-                      </button>
                     </div>
                   </motion.div>
                 )}
               </AnimatePresence>
             </div>
+            <WindowControls />
           </div>
         </motion.header>
 
@@ -1125,9 +1163,9 @@ export function DevicesPage() {
           <motion.div
             animate={{ x: showCustomActions ? '0%' : '100%' }}
             transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }}
-            className="absolute inset-0"
+            className="hidden absolute inset-0"
           >
-            <CustomActionsPage onBack={() => setShowCustomActions(false)} />
+            <CustomActionsPage />
           </motion.div>
         </div>
 
@@ -1202,7 +1240,7 @@ function DeviceCard({ device, activeButtons, dialRotation, wheelRotation, wheelO
   );
 }
 
-function DialDevice({ activeButtons, dialRotation, wheelRotation, wheelOffset, dialAngle }: {
+function DialDevice({ activeButtons, dialRotation: _dialRotation, wheelRotation: _wheelRotation, wheelOffset, dialAngle }: {
   activeButtons: Set<number>;
   dialRotation: number;
   wheelRotation: number;

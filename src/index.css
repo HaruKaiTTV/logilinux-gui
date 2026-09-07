@@ -2,6 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
+.window-control {
+  @apply w-8 h-8 flex items-center justify-center rounded text-gray-400 hover:bg-white/10 hover:text-white transition-colors text-lg;
+}
+
 @layer base {
   :root {
     --background: 222.2 84% 4.9%;

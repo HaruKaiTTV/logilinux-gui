@@ -119,7 +119,8 @@ LogiLinuxDevice logilinux_find_device(LogiLinuxLibrary lib, DeviceType type) {
         return nullptr;
       }
       wrapper->device_cache[type] = device;
-      std::cerr << "🔧 Cached new device for type " << type << std::endl;
+      std::cerr << "🔧 Cached new device for type " << type
+                << " path=" << device->getInfo().device_path << std::endl;
     }
 
     auto dev_wrapper = new DeviceWrapper();

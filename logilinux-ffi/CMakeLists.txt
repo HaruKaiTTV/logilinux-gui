@@ -5,14 +5,26 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Fetch logilinux from GitHub
+# Use the local SDK checkout when available so local driver fixes are included.
+# Fall back to GitHub for clean checkouts without the sibling SDK repository.
 include(FetchContent)
-FetchContent_Declare(
-    logilinux
-    GIT_REPOSITORY https://github.com/logilinux/LogiLinux.git
-    GIT_TAG master
-    SOURCE_SUBDIR lib
-)
+set(LOCAL_LOGILINUX_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../logilinux-sdk/logilinux-driver")
+if(EXISTS "${LOCAL_LOGILINUX_DIR}/lib/CMakeLists.txt")
+    message(STATUS "Using local LogiLinux SDK: ${LOCAL_LOGILINUX_DIR}")
+    FetchContent_Declare(
+        logilinux
+        SOURCE_DIR "${LOCAL_LOGILINUX_DIR}"
+        SOURCE_SUBDIR lib
+    )
+else()
+    message(STATUS "Local LogiLinux SDK not found; fetching from GitHub")
+    FetchContent_Declare(
+        logilinux
+        GIT_REPOSITORY https://github.com/HaruKaiTTV/logilinux.git
+        GIT_TAG master
+        SOURCE_SUBDIR lib
+    )
+endif()
 FetchContent_MakeAvailable(logilinux)
 
 add_library(logilinux-ffi SHARED

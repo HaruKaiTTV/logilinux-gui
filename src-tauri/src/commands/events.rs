@@ -2,12 +2,17 @@ use crate::logilinux;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
+struct EventCallbackContext {
+    app: AppHandle,
+    device_type: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum DeviceEvent {
-    ButtonPress { button_code: u32 },
-    ButtonRelease { button_code: u32 },
-    Rotation { delta: i32, rotation_type: String },
+    ButtonPress { button_code: u32, device_type: String },
+    ButtonRelease { button_code: u32, device_type: String },
+    Rotation { delta: i32, rotation_type: String, device_type: String },
     DeviceConnected { device_path: String },
     DeviceDisconnected { device_path: String },
 }
@@ -145,7 +150,11 @@ pub async fn start_device_monitoring(app: AppHandle) -> Result<(), String> {
                     let device_handle = device.handle;
 
                     unsafe {
-                        let app_ptr = Box::into_raw(Box::new(app.clone())) as *mut std::ffi::c_void;
+                        let callback_context = Box::new(EventCallbackContext {
+                            app: app.clone(),
+                            device_type: device_type_name.to_string(),
+                        });
+                        let context_ptr = Box::into_raw(callback_context) as *mut std::ffi::c_void;
 
                         extern "C" fn event_callback(
                             user_data: *mut std::ffi::c_void,
@@ -154,23 +163,29 @@ pub async fn start_device_monitoring(app: AppHandle) -> Result<(), String> {
                         ) {
                             log::debug!("Event callback triggered! Type: {:?}", event_type);
 
-                            let app = unsafe { &*(user_data as *const AppHandle) };
+                            let context = unsafe {
+                                &*(user_data as *const EventCallbackContext)
+                            };
 
                             let event = match event_type {
                                 logilinux::ffi::EventType_EVENT_TYPE_BUTTON_PRESS => {
                                     let button_event = unsafe {
                                         &*(event_data as *const logilinux::ffi::ButtonEvent)
                                     };
+                                    log::info!("Keypad/button press received: device_type={}, button_code={}", context.device_type, button_event.button_code);
                                     DeviceEvent::ButtonPress {
                                         button_code: button_event.button_code,
+                                        device_type: context.device_type.clone(),
                                     }
                                 }
                                 logilinux::ffi::EventType_EVENT_TYPE_BUTTON_RELEASE => {
                                     let button_event = unsafe {
                                         &*(event_data as *const logilinux::ffi::ButtonEvent)
                                     };
+                                    log::info!("Button release received: device_type={}, button_code={}", context.device_type, button_event.button_code);
                                     DeviceEvent::ButtonRelease {
                                         button_code: button_event.button_code,
+                                        device_type: context.device_type.clone(),
                                     }
                                 }
                                 logilinux::ffi::EventType_EVENT_TYPE_ROTATION => {
@@ -188,6 +203,7 @@ pub async fn start_device_monitoring(app: AppHandle) -> Result<(), String> {
                                     DeviceEvent::Rotation {
                                         delta: rotation_event.delta,
                                         rotation_type: rotation_type.to_string(),
+                                        device_type: context.device_type.clone(),
                                     }
                                 }
                                 _ => {
@@ -196,7 +212,7 @@ pub async fn start_device_monitoring(app: AppHandle) -> Result<(), String> {
                                 }
                             };
 
-                            if let Err(e) = app.emit("device-event", &event) {
+                            if let Err(e) = context.app.emit("device-event", &event) {
                                 log::error!("Failed to emit event: {}", e);
                             } else {
                                 log::debug!("Event emitted successfully");
@@ -206,7 +222,7 @@ pub async fn start_device_monitoring(app: AppHandle) -> Result<(), String> {
                         logilinux::ffi::logilinux_device_set_callback(
                             device_handle,
                             Some(event_callback),
-                            app_ptr,
+                            context_ptr,
                         );
                     }
 

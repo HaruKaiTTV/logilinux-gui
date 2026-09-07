@@ -8,7 +8,7 @@ use commands::actions::{execute_command, execute_key_combo, execute_shell_comman
 use commands::devices::discover_devices;
 use commands::display::set_key_image;
 use commands::events::{start_device_monitoring, stop_device_monitoring};
-use commands::file_dialog::select_python_file;
+use commands::file_dialog::{list_installed_applications, select_app_binary, select_python_file};
 use commands::file_ops::save_config_file;
 use commands::permissions::{check_permissions, request_elevation};
 use commands::python_plugins::{scan_python_plugins, run_python_plugin, stop_python_plugin, get_plugin_status, PluginState};
@@ -35,6 +35,8 @@ fn main() {
             stop_python_plugin,
             get_plugin_status,
             select_python_file,
+            select_app_binary,
+            list_installed_applications,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

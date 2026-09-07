@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { motion, AnimatePresence } from "framer-motion";
+import { WindowControls } from "../components/WindowControls";
 
 interface DeviceConfigPageProps {
-  deviceName: string;
   deviceType: string;
   onBack: () => void;
 }
@@ -36,6 +37,8 @@ interface Action {
     keyCombo?: string;
     allowHold?: boolean;
     customCommand?: string;
+    iconPath?: string;
+    keyComboMode?: "chord" | "sequence";
   };
 }
 
@@ -49,6 +52,12 @@ interface KeypadImage {
   base64: string;
   tiles: number[];
   createdAt: number;
+}
+
+interface InstalledApplication {
+  id: string;
+  name: string;
+  icon?: string;
 }
 
 type TileImageMapping = {
@@ -65,19 +74,19 @@ const AVAILABLE_ACTIONS: Action[] = [
   { id: "scroll-control", name: "Scroll Control", description: "Scroll up/down with rotation", category: "MEDIA & VOLUME", icon: "SCR", command: "scroll-control", rotationOnly: true },
   
   { id: "lockscreen", name: "Lock Screen", description: "Lock with hyprlock", category: "SYSTEM", icon: "LCK", command: "hyprlock" },
-  { id: "custom-command", name: "Custom Command", description: "Execute any shell command", category: "SYSTEM", icon: "CMD", command: "custom-command" },
   
   { id: "workspace-goto", name: "Go to Workspace", description: "Switch to specific workspace", category: "NAVIGATION", icon: "WS", command: "workspace-goto" },
   { id: "workspace-prev", name: "Previous Workspace", description: "Switch to previous workspace", category: "NAVIGATION", icon: "←", command: "hyprctl dispatch workspace e-1" },
   { id: "workspace-next", name: "Next Workspace", description: "Switch to next workspace", category: "NAVIGATION", icon: "→", command: "hyprctl dispatch workspace e+1" },
+  { id: "page-prev", name: "Previous Page", description: "Show the previous macro pad page", category: "NAVIGATION", icon: "‹", command: "macro-page-prev" },
+  { id: "page-next", name: "Next Page", description: "Show the next macro pad page", category: "NAVIGATION", icon: "›", command: "macro-page-next" },
   
-  { id: "custom-keybind", name: "Custom Keybind", description: "Press any key combination", category: "KEYBOARD", icon: "KEY", keyCombo: "custom-keybind" },
   
   { id: "open-terminal", name: "Open Terminal", description: "Launch terminal", category: "OPEN", icon: "TTY", command: "kitty" },
   { id: "open-browser", name: "Open Browser", description: "Launch Firefox", category: "OPEN", icon: "WWW", command: "firefox" },
   { id: "open-filemanager", name: "Open File Manager", description: "Launch Dolphin", category: "OPEN", icon: "DIR", command: "dolphin" },
 ];
-export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfigPageProps) {
+export function DeviceConfigPage({ deviceType, onBack }: DeviceConfigPageProps) {
   const [activePage, setActivePage] = useState(1);
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [configApp, setConfigApp] = useState("All Apps"); // The app we're configuring
@@ -89,8 +98,6 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
 
   const [selectedComponent, setSelectedComponent] = useState<number | null>(null);
   const [activeButtons, setActiveButtons] = useState<Set<number>>(new Set());
-  const [dialRotation, setDialRotation] = useState(0);
-  const [wheelRotation, setWheelRotation] = useState(0);
   const [wheelOffset, setWheelOffset] = useState(0);
   const [dialAngle, setDialAngle] = useState(0);
   const [buttonMappings, setButtonMappings] = useState<ButtonMapping>({});
@@ -107,6 +114,20 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
   const [isListeningForKeys, setIsListeningForKeys] = useState(false);
   const [tempAllowHold, setTempAllowHold] = useState(false);
   const [tempCustomCommand, setTempCustomCommand] = useState("");
+  const [customCommands, setCustomCommands] = useState<Action[]>([]);
+  const [customKeybinds, setCustomKeybinds] = useState<Action[]>([]);
+  const [showKeybindCreator, setShowKeybindCreator] = useState(false);
+  const [keybindNameDraft, setKeybindNameDraft] = useState("");
+  const [keybindComboDraft, setKeybindComboDraft] = useState("");
+  const [isRecordingKeybind, setIsRecordingKeybind] = useState(false);
+  const [keybindMode, setKeybindMode] = useState<"chord" | "sequence">("chord");
+  const [installedApplications, setInstalledApplications] = useState<InstalledApplication[]>([]);
+  const [selectedApplication, setSelectedApplication] = useState<InstalledApplication | null>(null);
+  const [selectedLaunchCommand, setSelectedLaunchCommand] = useState<string | null>(null);
+  const [commandNameDraft, setCommandNameDraft] = useState("");
+  const [showCommandNameDialog, setShowCommandNameDialog] = useState(false);
+  const [showApplicationPicker, setShowApplicationPicker] = useState(false);
+  const [applicationSearch, setApplicationSearch] = useState("");
   const dialSensitivity = 1;
   const dialSensitivityRef = useRef(dialSensitivity);
   const buttonMappingsRef = useRef<ButtonMapping>({});
@@ -117,14 +138,140 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
   const [tileImageMappings, setTileImageMappings] = useState<TileImageMapping>({});
   const [selectedTiles, setSelectedTiles] = useState<number[]>([]);
   const [imageMode, setImageMode] = useState<'single' | 'multi'>('single');
-  const [showImageManager, setShowImageManager] = useState(false);
-  const [showImagePicker, setShowImagePicker] = useState(false);
   const [activeTab, setActiveTab] = useState<'actions' | 'images'>('actions');
   const lastSyncedMappingsRef = useRef<string>('');
   const isLoadingMappingsRef = useRef(false);
   const isLoadingActionsRef = useRef(false);
 
   const isKeypad = deviceType === "CREATIVE_CONSOLE";
+  const availableActions = [...AVAILABLE_ACTIONS, ...customCommands, ...customKeybinds];
+
+  useEffect(() => {
+    if (!isRecordingKeybind) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      event.preventDefault();
+      // Tauri/WebKit can report device-generated HID events as synthetic
+      // GTK/Unidentified keys. They are not valid keyboard macro inputs.
+      if (!event.key || event.key === "Unidentified" || event.key.startsWith("Unidentified(") || event.code.startsWith("Unidentified")) {
+        return;
+      }
+      if (event.key === "Enter") {
+        setIsRecordingKeybind(false);
+        return;
+      }
+      const normalizedKey: Record<string, string> = {
+        Control: "ctrl", Shift: "shift", Alt: "alt", Meta: "super",
+        " ": "space", Escape: "esc", ArrowUp: "up", ArrowDown: "down",
+        ArrowLeft: "left", ArrowRight: "right",
+      };
+      const key = normalizedKey[event.key] || (event.key.length === 1 ? event.key.toLowerCase() : event.key.toLowerCase());
+      const keys = new Set(keybindComboDraft ? keybindComboDraft.split("+") : []);
+      keys.add(key);
+      setKeybindComboDraft(Array.from(keys).join("+"));
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isRecordingKeybind, keybindComboDraft]);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("logilinux-custom-commands");
+      if (saved) setCustomCommands(JSON.parse(saved));
+      const savedKeybinds = localStorage.getItem("logilinux-custom-keybinds");
+      if (savedKeybinds) setCustomKeybinds(JSON.parse(savedKeybinds));
+    } catch (error) {
+      console.error("Failed to load custom commands:", error);
+    }
+  }, []);
+
+  const saveCustomCommands = (commands: Action[]) => {
+    setCustomCommands(commands);
+    localStorage.setItem("logilinux-custom-commands", JSON.stringify(commands));
+  };
+
+  const saveCustomKeybinds = (keybinds: Action[]) => {
+    setCustomKeybinds(keybinds);
+    localStorage.setItem("logilinux-custom-keybinds", JSON.stringify(keybinds));
+  };
+
+  const createCustomKeybind = () => {
+    if (!keybindNameDraft.trim() || !keybindComboDraft.trim()) return;
+    saveCustomKeybinds([...customKeybinds, {
+      id: `custom-keybind-${Date.now()}`,
+      name: keybindNameDraft.trim(),
+      description: "Replay recorded keyboard macro",
+      category: "KEYBOARD",
+      icon: "KEY",
+      keyCombo: "custom-keybind",
+      config: { keyCombo: keybindComboDraft.trim(), keyComboMode: keybindMode },
+    }]);
+    setShowKeybindCreator(false);
+    setKeybindNameDraft("");
+    setKeybindComboDraft("");
+  };
+
+  const deleteCustomKeybind = (action: Action) => {
+    saveCustomKeybinds(customKeybinds.filter(keybind => keybind.id !== action.id));
+    setButtonMappings(prev => Object.fromEntries(Object.entries(prev).map(([key, value]) => [key, value?.id === action.id ? null : value])));
+  };
+
+  const addCustomCommand = async () => {
+    const applications = await invoke<InstalledApplication[]>("list_installed_applications");
+    setInstalledApplications(applications);
+    setApplicationSearch("");
+    setShowApplicationPicker(true);
+  };
+
+  const chooseApplication = (application: InstalledApplication) => {
+    setSelectedApplication(application);
+    setSelectedLaunchCommand(null);
+    setCommandNameDraft(application.name);
+    setShowApplicationPicker(false);
+    setShowCommandNameDialog(true);
+  };
+
+  const chooseCustomBinary = async () => {
+    const binary = await invoke<string | null>("select_app_binary");
+    if (!binary) return;
+    const binaryName = binary.split("/").pop() || binary;
+    setSelectedApplication({ id: "", name: binaryName, icon: createBinaryLabelImage(binaryName) });
+    setSelectedLaunchCommand(`exec -- '${binary.replace(/'/g, "'\\''")}'`);
+    setCommandNameDraft(binaryName);
+    setShowApplicationPicker(false);
+    setShowCommandNameDialog(true);
+  };
+
+  const createCustomCommand = () => {
+    if (!selectedApplication || !commandNameDraft.trim()) return;
+    const name = commandNameDraft.trim();
+    const command = selectedLaunchCommand || `gtk-launch '${selectedApplication.id.replace(/'/g, "'\\''")}'`;
+    saveCustomCommands([...customCommands, {
+      id: `custom-command-${Date.now()}`,
+      name,
+      description: "Run a custom shell command",
+      category: "SYSTEM",
+      icon: "CMD",
+      command: "custom-command",
+      config: {
+        customCommand: command,
+        // Desktop files do not always expose a resolvable icon. Keep a
+        // generated label so every custom command can still get a key image.
+        iconPath: selectedApplication.icon || createBinaryLabelImage(name),
+      },
+    }]);
+    setShowApplicationPicker(false);
+    setShowCommandNameDialog(false);
+    setSelectedApplication(null);
+    setSelectedLaunchCommand(null);
+    setCommandNameDraft("");
+  };
+
+  const deleteCustomCommand = (action: Action) => {
+    saveCustomCommands(customCommands.filter(command => command.id !== action.id));
+    setButtonMappings(prev => Object.fromEntries(
+      Object.entries(prev).map(([key, value]) => [key, value?.id === action.id ? null : value])
+    ));
+  };
 
   // Load list of apps that have configurations
   useEffect(() => {
@@ -328,144 +475,57 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
       
       // Don't execute actions in config page
     } else if (event.type === "Rotation" && event.delta !== undefined) {
+      const delta = event.delta;
       if (event.rotation_type === "DIAL") {
         const sensitivity = dialSensitivityRef.current;
-        setDialRotation(event.delta);
-        setDialAngle(prev => prev + event.delta * sensitivity);
-        setTimeout(() => setDialRotation(0), 300);
+        setDialAngle(prev => prev + delta * sensitivity);
         
         // Don't execute actions in config page
       } else if (event.rotation_type === "WHEEL") {
-        setWheelRotation(event.delta);
-        setWheelOffset(prev => prev - event.delta * 3);
-        setTimeout(() => setWheelRotation(0), 300);
+        setWheelOffset(prev => prev - delta * 3);
         
         // Don't execute actions in config page
       }
     }
   };
 
-  const executeAction = async (action: Action, isPress: boolean = true) => {
-    if (action.keyCombo) {
-      if (action.keyCombo === "custom-keybind" && action.config?.keyCombo) {
-        const allowHold = action.config.allowHold ?? false;
-        try {
-          await invoke("execute_key_combo", { 
-            combo: action.config.keyCombo,
-            hold: allowHold,
-            press: isPress
-          });
-        } catch (err) {
-        }
-      } else if (action.keyCombo !== "custom-keybind") {
-        try {
-          await invoke("execute_key_combo", { 
-            combo: action.keyCombo,
-            hold: false,
-            press: true
-          });
-        } catch (err) {
-        }
-      }
-    } else if (action.command) {
-      if (action.command === "workspace-goto") {
-        const workspaceNum = action.config?.workspaceNumber ?? 1;
-        const command = `hyprctl dispatch workspace ${workspaceNum}`;
-        try {
-          await invoke("execute_command", { command });
-        } catch (err) {
-        }
-      } else if (action.command === "custom-command") {
-        const customCmd = action.config?.customCommand ?? "";
-        if (customCmd) {
-          try {
-            await invoke("execute_command", { command: customCmd });
-          } catch (err) {
-          }
-        }
-      } else {
-        try {
-          await invoke("execute_command", { command: action.command });
-        } catch (err) {
-        }
-      }
-    }
-  };
-
-  const executeRotationAction = async (action: Action, delta: number) => {
-    if (action.command === "volume-control") {
-      const minVol = action.config?.minVolume ?? 0;
-      const maxVol = action.config?.maxVolume ?? 100;
-      const sensitivity = action.config?.sensitivity ?? 1;
-      
-      const volumeRange = maxVol - minVol;
-      const volumeChange = (volumeRange / 360) * delta * sensitivity;
-      
-      const direction = volumeChange > 0 ? "+" : "-";
-      const absChange = Math.abs(volumeChange);
-      const volumeCommand = `pactl set-sink-volume @DEFAULT_SINK@ ${direction}${absChange.toFixed(2)}%`;
-      
-      try {
-        await invoke("execute_command", { command: volumeCommand });
-      } catch (err) {
-      }
-      return;
-    }
-    
-    if (action.command === "brightness-control") {
-      const minBright = action.config?.minBrightness ?? 0;
-      const maxBright = action.config?.maxBrightness ?? 100;
-      const sensitivity = action.config?.brightnessSensitivity ?? 1;
-      
-      const brightnessRange = maxBright - minBright;
-      const brightnessChange = (brightnessRange / 360) * delta * sensitivity;
-      
-      const direction = brightnessChange > 0 ? "+" : "-";
-      const absChange = Math.abs(brightnessChange);
-      const brightnessCommand = `brightnessctl set ${absChange.toFixed(2)}%${direction}`;
-      
-      try {
-        await invoke("execute_command", { command: brightnessCommand });
-      } catch (err) {
-      }
-      return;
-    }
-    
-    if (action.command === "scroll-control") {
-      // Simulate mouse scroll events
-      const scrollAmount = Math.abs(delta);
-      const direction = delta > 0 ? "up" : "down";
-      
-      try {
-        await invoke("execute_scroll", { direction, amount: scrollAmount });
-      } catch (err) {
-        // Fallback: use xdotool if available
-        try {
-          const scrollCmd = delta > 0 
-            ? `xdotool click 4` // scroll up
-            : `xdotool click 5`; // scroll down
-          
-          for (let i = 0; i < scrollAmount; i++) {
-            await invoke("execute_command", { command: scrollCmd });
-          }
-        } catch (fallbackErr) {
-        }
-      }
-      return;
-    }
-    
-    const times = Math.abs(delta);
-    for (let i = 0; i < times; i++) {
-      await executeAction(action);
-    }
-  };
-
-  const assignAction = (action: Action) => {
+  const assignAction = async (action: Action) => {
     if (selectedComponent !== null) {
       setButtonMappings(prev => ({
         ...prev,
         [selectedComponent]: action
       }));
+
+      // Custom commands selected from the application picker carry their icon.
+      // Put that icon on the same keypad tile as the action assignment.
+      if (isKeypad && selectedComponent >= 0 && (action.id.startsWith("custom-command") || action.id.startsWith("custom-keybind") || action.command)) {
+        try {
+          const iconPath = action.config?.iconPath || createBinaryLabelImage(action.name);
+          let processedImage: string;
+          try {
+            const iconUrl = iconPath.startsWith("data:") ? iconPath : convertFileSrc(iconPath);
+            processedImage = await downscaleImage(iconUrl, 118, 118);
+          } catch (iconError) {
+            console.warn('Application icon could not be loaded; using command label image', iconError);
+            processedImage = await downscaleImage(createBinaryLabelImage(action.name), 118, 118);
+          }
+          const image: KeypadImage = {
+            id: `action-icon-${action.id}-${Date.now()}`,
+            name: action.name,
+            base64: processedImage,
+            tiles: [selectedComponent],
+            createdAt: Date.now(),
+          };
+          const updatedLibrary = [...imageLibrary, image];
+          const updatedMappings = { ...tileImageMappings, [selectedComponent]: { imageId: image.id } };
+          setImageLibrary(updatedLibrary);
+          localStorage.setItem('keypad-images', JSON.stringify(updatedLibrary));
+          setTileImageMappings(updatedMappings);
+          await sendImageToDevice(selectedComponent, image);
+        } catch (error) {
+          console.error('Failed to apply application icon to keypad tile:', error);
+        }
+      }
     }
   };
 
@@ -476,10 +536,60 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
         delete updated[selectedComponent];
         return updated;
       });
+
+      if (isKeypad) {
+        const updatedImageMappings = { ...tileImageMappings };
+        delete updatedImageMappings[selectedComponent];
+        setTileImageMappings(updatedImageMappings);
+
+        const blankBase64 = createBlankImage();
+        if (blankBase64) {
+          const blankImage: KeypadImage = {
+            id: `blank-${Date.now()}`,
+            name: 'blank',
+            base64: blankBase64,
+            tiles: [],
+            createdAt: Date.now(),
+          };
+          void sendImageToDevice(selectedComponent, blankImage);
+        }
+      }
     }
   };
 
   // Image handling functions
+  const createBinaryLabelImage = (binaryName: string): string => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 118;
+    canvas.height = 118;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+
+    ctx.fillStyle = '#17202a';
+    ctx.fillRect(0, 0, 118, 118);
+    ctx.fillStyle = '#67e8f9';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 16px sans-serif';
+    const words = binaryName.replace(/[-_.]+/g, ' ').split(/\s+/).filter(Boolean);
+    const lines: string[] = [];
+    let line = '';
+    for (const word of words) {
+      const candidate = line ? `${line} ${word}` : word;
+      if (ctx.measureText(candidate).width > 102 && line) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = candidate;
+      }
+    }
+    if (line) lines.push(line);
+    const visibleLines = lines.slice(0, 5);
+    const startY = 59 - ((visibleLines.length - 1) * 10);
+    visibleLines.forEach((text, index) => ctx.fillText(text, 59, startY + index * 20));
+    return canvas.toDataURL('image/png');
+  };
+
   const createBlankImage = (): string => {
     // Create a blank 118x118 black image
     const canvas = document.createElement('canvas');
@@ -789,27 +899,6 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
     setTileImageMappings(newMappings);
   };
 
-  const clearTileImage = (tileIndex: number) => {
-    setTileImageMappings(prev => {
-      const updated = { ...prev };
-      delete updated[tileIndex];
-      return updated;
-    });
-
-    // Send blank image to physical device
-    const blankBase64 = createBlankImage();
-    if (blankBase64) {
-      const blankImageObj: KeypadImage = {
-        id: `blank-${Date.now()}`,
-        name: 'blank',
-        base64: blankBase64,
-        tiles: [],
-        createdAt: Date.now()
-      };
-      sendImageToDevice(tileIndex, blankImageObj);
-    }
-  };
-
   const toggleTileSelection = (tileIndex: number) => {
     console.log('Toggle tile selection:', { tileIndex, imageMode, currentSelectedTiles: selectedTiles });
     if (imageMode === 'single') {
@@ -849,12 +938,13 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
           initial={{ y: -20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ duration: 0.2, delay: 0.1 }}
-          className="h-16 flex items-center justify-between px-6 z-10"
+          className="h-16 flex items-center justify-between px-6 z-10 relative"
         >
+          <div data-tauri-drag-region className="absolute inset-0 z-0" />
           {/* Back Button */}
           <button 
             onClick={onBack}
-            className="hover:bg-white/10 p-2 rounded-full transition-colors"
+            className="relative z-10 hover:bg-white/10 p-2 rounded-full transition-colors"
           >
             <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
@@ -862,7 +952,7 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
           </button>
 
           {/* App Selector with Add Option */}
-          <div className="flex items-center gap-3">
+          <div className="relative z-10 flex items-center gap-3">
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-black/40 border border-white/10">
               <svg className="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/>
@@ -948,7 +1038,10 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
           </div>
 
           {/* Spacer */}
-          <div className="w-8"></div>
+          <div className="relative z-10 flex items-center gap-3">
+            <div className="w-8"></div>
+            <WindowControls />
+          </div>
         </motion.header>
 
         {/* Device Stage */}
@@ -1007,8 +1100,8 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
           </div>
         </motion.div>
 
-        {/* Bottom Dock */}
-        <motion.div
+        {/* Bottom Dock removed; device configuration controls are available above. */}
+        {false && <motion.div
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ duration: 0.2, delay: 0.2 }}
@@ -1047,7 +1140,7 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
           </div>
-        </motion.div>
+        </motion.div>}
 
         {/* Beta Tag */}
         <div className="absolute bottom-0 left-1/2 -translate-x-1/2 z-20">
@@ -1152,7 +1245,7 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
             <>
           {sections.map(section => {
             const isRotationComponent = selectedComponent === 1000 || selectedComponent === 1001;
-            const categoryActions = AVAILABLE_ACTIONS.filter(a => {
+            const categoryActions = availableActions.filter(a => {
               if (a.category !== section) return false;
               
               if (a.rotationOnly && !isRotationComponent) return false;
@@ -1160,7 +1253,7 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
               return true;
             });
             
-            if (categoryActions.length === 0) return null;
+            if (categoryActions.length === 0 && section !== "SYSTEM" && section !== "KEYBOARD") return null;
 
             return (
               <div key={section} className="mb-6">
@@ -1181,6 +1274,16 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
 
                 {expandedSection === section && (
                   <div className="flex flex-col gap-1 ml-6">
+                    {section === "KEYBOARD" && (
+                      <button onClick={() => { setKeybindNameDraft(""); setKeybindComboDraft(""); setShowKeybindCreator(true); }} className="mb-2 w-full rounded-md border border-dashed border-cyan-400/40 px-2.5 py-2 text-left text-xs font-bold text-cyan-400 hover:bg-cyan-400/10">
+                        + Add Custom Keybind
+                      </button>
+                    )}
+                    {section === "SYSTEM" && (
+                      <button onClick={addCustomCommand} className="mb-2 w-full rounded-md border border-dashed border-cyan-400/40 px-2.5 py-2 text-left text-xs font-bold text-cyan-400 hover:bg-cyan-400/10">
+                        + Add Custom Command
+                      </button>
+                    )}
                     {categoryActions.map(action => (
                       <div key={action.id} className="relative">
                         <button
@@ -1202,7 +1305,7 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
                             {action.rotationOnly && (
                               <span className="text-[9px] px-1.5 py-0.5 bg-purple-500/20 text-purple-300 rounded">ROTATION</span>
                             )}
-                            {(action.id === "volume-control" || action.id === "brightness-control" || action.id === "workspace-goto" || action.id === "custom-keybind" || action.id === "custom-command") && (
+                            {(action.id === "volume-control" || action.id === "brightness-control" || action.id === "workspace-goto") && (
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -1255,7 +1358,7 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
                               Workspace: {action.config.workspaceNumber}
                             </div>
                           )}
-                          {action.id === "custom-keybind" && action.config?.keyCombo && (
+                              {action.id.startsWith("custom-keybind-") && action.config?.keyCombo && (
                             <div className="text-[9px] text-cyan-400 mt-1 font-mono">
                               {action.config.keyCombo}
                             </div>
@@ -1264,6 +1367,14 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
                             <div className="text-[9px] text-cyan-400 mt-1 font-mono truncate" title={action.config.customCommand}>
                               {action.config.customCommand}
                             </div>
+                          )}
+                          {(action.id.startsWith("custom-command-") || action.id.startsWith("custom-keybind-")) && (
+                            <button
+                              onClick={(event) => { event.stopPropagation(); action.id.startsWith("custom-keybind-") ? deleteCustomKeybind(action) : deleteCustomCommand(action); }}
+                              className="mt-2 text-[10px] text-red-400 hover:text-red-300"
+                            >
+                              {action.id.startsWith("custom-keybind-") ? "Delete keybind" : "Delete command"}
+                            </button>
                           )}
                         </button>
                       </div>
@@ -1435,6 +1546,97 @@ export function DeviceConfigPage({ deviceName, deviceType, onBack }: DeviceConfi
         </div>
       </motion.div>
     </div>
+
+    {showApplicationPicker && (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-6">
+        <div className="bg-[#1a1a1a] border border-white/10 rounded-lg p-5 w-full max-w-md shadow-2xl">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold text-white">Choose Application</h3>
+            <button onClick={() => setShowApplicationPicker(false)} className="text-gray-400 hover:text-white text-xl">×</button>
+          </div>
+          <input
+            autoFocus
+            type="search"
+            placeholder="Search applications..."
+            value={applicationSearch}
+            onChange={event => setApplicationSearch(event.target.value)}
+            className="w-full mb-3 bg-black/40 border border-white/10 rounded px-3 py-2 text-white text-sm focus:border-cyan-400 focus:outline-none"
+          />
+          <div className="max-h-[60vh] overflow-y-auto space-y-1 pr-1">
+            <button
+              onClick={chooseCustomBinary}
+              className="w-full text-left px-3 py-2 mb-2 rounded border border-dashed border-cyan-400/40 text-sm font-bold text-cyan-400 hover:bg-cyan-400/15 transition-colors"
+            >
+              + Choose custom binary…
+            </button>
+            {installedApplications
+              .filter(application => application.name.toLowerCase().includes(applicationSearch.trim().toLowerCase()))
+              .map(application => (
+              <button
+                key={application.id}
+                onClick={() => chooseApplication(application)}
+                className="w-full text-left px-3 py-2 rounded text-sm text-gray-200 hover:bg-cyan-400/15 hover:text-cyan-300 transition-colors"
+              >
+                {application.name}
+              </button>
+              ))}
+            {installedApplications.length > 0 && installedApplications.every(application =>
+              !application.name.toLowerCase().includes(applicationSearch.trim().toLowerCase())
+            ) && (
+              <p className="px-3 py-4 text-center text-xs text-gray-500">No matching applications</p>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {showCommandNameDialog && selectedApplication && (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-6">
+        <div className="bg-[#1a1a1a] border border-white/10 rounded-lg p-5 w-full max-w-md shadow-2xl">
+          <h3 className="text-lg font-bold text-white mb-2">Name Custom Command</h3>
+          <p className="text-xs text-gray-400 mb-4">Application: {selectedApplication.name}</p>
+          <label className="block text-xs text-gray-400 mb-2">Command name</label>
+          <input
+            autoFocus
+            value={commandNameDraft}
+            onChange={event => setCommandNameDraft(event.target.value)}
+            onKeyDown={event => { if (event.key === "Enter") createCustomCommand(); }}
+            className="w-full bg-black/40 border border-white/10 rounded px-3 py-2 text-white text-sm focus:border-cyan-400 focus:outline-none"
+          />
+          <div className="flex gap-3 mt-5">
+            <button onClick={() => setShowCommandNameDialog(false)} className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 text-white rounded">Cancel</button>
+            <button onClick={createCustomCommand} disabled={!commandNameDraft.trim()} className="flex-1 px-4 py-2 bg-cyan-400 hover:bg-cyan-500 disabled:opacity-40 text-black font-bold rounded">Save</button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {showKeybindCreator && (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-6">
+        <div className="bg-[#1a1a1a] border border-white/10 rounded-lg p-5 w-full max-w-md shadow-2xl">
+          <h3 className="text-lg font-bold text-white mb-4">Create Custom Keybind</h3>
+          <label className="block text-xs text-gray-400 mb-2">Keybind name</label>
+          <input autoFocus value={keybindNameDraft} onChange={event => setKeybindNameDraft(event.target.value)} className="w-full bg-black/40 border border-white/10 rounded px-3 py-2 text-white text-sm focus:border-cyan-400 focus:outline-none" />
+          <label className="block text-xs text-gray-400 mt-4 mb-2">Recorded keys</label>
+          <div className={`w-full rounded px-3 py-3 text-center font-mono text-sm ${isRecordingKeybind ? 'border border-cyan-400 text-cyan-300' : 'border border-white/10 text-white'}`}>
+            {keybindComboDraft || (isRecordingKeybind ? 'Press keys, then press Enter' : 'No keys recorded')}
+          </div>
+          <label className="block text-xs text-gray-400 mt-4 mb-2">Playback mode</label>
+          <select value={keybindMode} onChange={event => setKeybindMode(event.target.value as "chord" | "sequence")} className="w-full bg-[#111827] border border-cyan-400/40 rounded px-3 py-2 text-gray-100 text-sm focus:border-cyan-400 focus:outline-none" style={{ colorScheme: "dark" }}>
+            <option value="chord" className="bg-[#111827] text-gray-100">Press all keys together</option>
+            <option value="sequence" className="bg-[#111827] text-gray-100">Press keys in order</option>
+          </select>
+          <div className="flex gap-2 mt-3">
+            <button onClick={() => { setKeybindComboDraft(""); setIsRecordingKeybind(true); }} className="flex-1 px-3 py-2 bg-cyan-400/20 text-cyan-300 rounded">{isRecordingKeybind ? 'Recording…' : 'Record Macro'}</button>
+            <button onClick={() => setIsRecordingKeybind(false)} className="px-3 py-2 bg-white/5 text-gray-300 rounded">Stop</button>
+          </div>
+          <div className="flex gap-3 mt-5">
+            <button onClick={() => { setIsRecordingKeybind(false); setShowKeybindCreator(false); }} className="flex-1 px-4 py-2 bg-white/5 text-white rounded">Cancel</button>
+            <button onClick={createCustomKeybind} disabled={!keybindNameDraft.trim() || !keybindComboDraft.trim()} className="flex-1 px-4 py-2 bg-cyan-400 disabled:opacity-40 text-black font-bold rounded">Save</button>
+          </div>
+        </div>
+      </div>
+    )}
 
     {/* Configuration Modal */}
     <AnimatePresence>

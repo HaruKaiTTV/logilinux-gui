@@ -1,0 +1,14 @@
+pkgname=logilinux-gui
+pkgver=1.0.0
+pkgrel=1
+pkgdesc='Logitech MX Creative Console configuration GUI'
+arch=('x86_64')
+license=('MIT')
+depends=('gtk3' 'webkit2gtk-4.1' 'ydotool')
+source=()
+
+package() {
+  install -Dm755 "$startdir/.stage/logilinux-gui" "$pkgdir/usr/bin/logilinux-gui"
+  install -Dm755 "$startdir/.stage/liblogilinux-ffi.so" "$pkgdir/usr/lib/liblogilinux-ffi.so"
+  install -Dm644 "$startdir/../udev/50-logi-mx-creative-console-user.rules" "$pkgdir/usr/lib/udev/rules.d/50-logi-mx-creative-console-user.rules"
+}
