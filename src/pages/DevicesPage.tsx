@@ -876,6 +876,16 @@ export function DevicesPage() {
         switchMacroPadPage("next");
       } else if (action.command === "macro-page-prev") {
         switchMacroPadPage("previous");
+      } else if (action.command === "media-play-pause") {
+        try {
+          await invoke("execute_key_combo", {
+            combo: "play-pause",
+            hold: false,
+            press: true,
+          });
+        } catch (err) {
+          console.error("Failed to send media play/pause key", err);
+        }
       } else if (action.command === "workspace-goto") {
         // Handle workspace goto with config
         const workspaceNum = action.config?.workspaceNumber ?? 1;

@@ -70,6 +70,7 @@ type TileImageMapping = {
 const AVAILABLE_ACTIONS: Action[] = [
   { id: "mute", name: "Toggle Mute", description: "Mute/unmute audio", category: "MEDIA & VOLUME", icon: "VOL", command: "pactl set-sink-mute @DEFAULT_SINK@ toggle" },
   { id: "mic-mute", name: "Toggle Mic Mute", description: "Mute/unmute the default microphone", category: "MEDIA & VOLUME", icon: "MIC", command: "pactl set-source-mute @DEFAULT_SOURCE@ toggle" },
+  { id: "play-pause", name: "Play/Pause Media", description: "Play or pause the active media player", category: "MEDIA & VOLUME", icon: "▶Ⅱ", command: "media-play-pause" },
   { id: "volume-control", name: "Volume Control", description: "Adjust volume with rotation", category: "MEDIA & VOLUME", icon: "VOL", command: "volume-control", rotationOnly: true },
   { id: "brightness-control", name: "Brightness Control", description: "Adjust brightness with rotation", category: "MEDIA & VOLUME", icon: "BRT", command: "brightness-control", rotationOnly: true },
   { id: "scroll-control", name: "Scroll Control", description: "Scroll up/down with rotation", category: "MEDIA & VOLUME", icon: "SCR", command: "scroll-control", rotationOnly: true },

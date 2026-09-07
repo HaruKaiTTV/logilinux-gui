@@ -168,6 +168,7 @@ fn get_key_code(key: &str) -> Result<&'static str, String> {
         // On this desktop environment the keyboard's Menu/Application key is
         // emitted as KEY_COMPOSE (127), which is also what ydotool reproduces.
         "menu" | "contextmenu" | "apps" => Ok("127"),
+        "play-pause" | "playpause" => Ok("164"),
         "f1" => Ok("59"),
         "f2" => Ok("60"),
         "f3" => Ok("61"),
