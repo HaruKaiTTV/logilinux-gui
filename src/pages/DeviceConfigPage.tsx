@@ -1861,7 +1861,12 @@ export function DeviceConfigPage({ deviceType, onBack }: DeviceConfigPageProps) 
                       if (e.metaKey) keys.push("super");
                       
                       if (!["Control", "Shift", "Alt", "Meta"].includes(e.key)) {
-                        keys.push(e.key.toLowerCase());
+                        const normalizedKey: Record<string, string> = {
+                          ContextMenu: "menu",
+                          Apps: "menu",
+                          Menu: "menu",
+                        };
+                        keys.push(normalizedKey[e.key] || e.key.toLowerCase());
                       }
                       
                       if (keys.length > 0) {
