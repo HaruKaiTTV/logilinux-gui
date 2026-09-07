@@ -505,6 +505,7 @@ export function DeviceConfigPage({ deviceType, onBack }: DeviceConfigPageProps) 
           try {
             const iconUrl = iconPath.startsWith("data:") ? iconPath : convertFileSrc(iconPath);
             processedImage = await downscaleImage(iconUrl, 118, 118);
+            processedImage = await overlayAppName(processedImage, action.name);
           } catch (iconError) {
             console.warn('Application icon could not be loaded; using command label image', iconError);
             processedImage = await downscaleImage(createBinaryLabelImage(action.name), 118, 118);
@@ -627,6 +628,47 @@ export function DeviceConfigPage({ deviceType, onBack }: DeviceConfigPageProps) 
         // Convert to base64
         const downscaled = canvas.toDataURL('image/jpeg', 0.85);
         resolve(downscaled);
+      };
+      img.onerror = reject;
+      img.src = base64Image;
+    });
+  };
+
+  const overlayAppName = async (base64Image: string, appName: string): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 118;
+        canvas.height = 118;
+        const ctx = canvas.getContext('2d');
+
+        if (!ctx) {
+          reject(new Error('Failed to get canvas context'));
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, 118, 118);
+
+        const label = appName.trim();
+        if (label) {
+          const fontSize = 14;
+          const padding = 5;
+          ctx.font = `600 ${fontSize}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
+          // Keep the label readable over both light and dark desktop icons.
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
+          ctx.fillRect(0, 118 - fontSize - padding * 2, 118, fontSize + padding * 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+          ctx.shadowBlur = 3;
+          ctx.fillText(label, 59, 118 - fontSize / 2 - padding, 108);
+          ctx.shadowBlur = 0;
+        }
+
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
       };
       img.onerror = reject;
       img.src = base64Image;
