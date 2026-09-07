@@ -38,7 +38,10 @@
     ],
     "linux": {
       "deb": {
-        "depends": []
+        "depends": ["ydotool"]
+      },
+      "rpm": {
+        "depends": ["ydotool"]
       }
     }
   }
