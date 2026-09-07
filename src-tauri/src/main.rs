@@ -4,7 +4,7 @@ mod commands;
 mod logilinux;
 mod permissions;
 
-use commands::actions::{execute_command, execute_key_combo, execute_shell_command};
+use commands::actions::{execute_command, execute_key_combo, execute_scroll, execute_shell_command};
 use commands::devices::discover_devices;
 use commands::display::set_key_image;
 use commands::events::{start_device_monitoring, stop_device_monitoring};
@@ -26,6 +26,7 @@ fn main() {
             stop_device_monitoring,
             execute_key_combo,
             execute_command,
+            execute_scroll,
             execute_shell_command,
             set_key_image,
             get_active_window,

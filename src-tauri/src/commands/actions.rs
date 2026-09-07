@@ -337,6 +337,33 @@ pub async fn execute_command(command: String) -> Result<(), String> {
 }
 
 #[command]
+pub async fn execute_scroll(direction: String, amount: u32) -> Result<(), String> {
+    let wheel_delta = match direction.to_lowercase().as_str() {
+        "up" => -(amount.max(1) as i32),
+        "down" => amount.max(1) as i32,
+        _ => return Err(format!("Unknown scroll direction: {}", direction)),
+    };
+    let socket = env::var("YDOTOOL_SOCKET").unwrap_or_else(|_| {
+        let uid = env::var("SUDO_UID").unwrap_or_else(|_| "1000".to_string());
+        if env::var("SUDO_UID").is_ok() {
+            format!("/run/user/{}/.ydotool_socket", uid)
+        } else {
+            "/tmp/.ydotool_socket".to_string()
+        }
+    });
+
+    let status = Command::new("/usr/bin/ydotool")
+        .env("YDOTOOL_SOCKET", &socket)
+        .args(["mousemove", "--wheel", "--ypos", &wheel_delta.to_string()])
+        .status()
+        .map_err(|e| format!("Failed to start ydotool scroll: {}", e))?;
+    if !status.success() {
+        return Err(format!("ydotool scroll exited with status {}", status));
+    }
+    Ok(())
+}
+
+#[command]
 pub async fn execute_shell_command(command: String) -> Result<String, String> {
     let sudo_user = env::var("SUDO_USER").ok();
     let sudo_uid = env::var("SUDO_UID").ok();
