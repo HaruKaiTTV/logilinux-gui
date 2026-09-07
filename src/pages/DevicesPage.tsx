@@ -344,6 +344,12 @@ export function DevicesPage() {
     // Check what devices are connected
     const hasKeypad = devices.some(d => d.device_type === "CREATIVE_CONSOLE");
     const hasDialpad = devices.some(d => d.device_type === "DIALPAD");
+
+    // Clear mappings from the previous page before loading this page. Without
+    // this reset, an empty page reuses old custom-command actions.
+    keypadMappingsRef.current = {};
+    dialpadMappingsRef.current = {};
+    buttonMappingsRef.current = {};
     
     // Load mappings for each connected device type
     if (hasKeypad) {

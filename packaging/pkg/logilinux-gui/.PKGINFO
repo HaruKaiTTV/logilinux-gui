@@ -6,7 +6,7 @@ xdata = pkgtype=pkg
 pkgver = 1.0.0-1
 pkgdesc = Logitech MX Creative Console configuration GUI
 url = 
-builddate = 1788777167
+builddate = 1788813341
 packager = Unknown Packager
 size = 12808451
 arch = x86_64
