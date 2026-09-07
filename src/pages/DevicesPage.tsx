@@ -45,7 +45,7 @@ interface Action {
     keyCombo?: string;
     allowHold?: boolean;
     customCommand?: string;
-    keyComboMode?: "chord" | "sequence";
+    keyComboMode?: "chord" | "sequence" | "hold";
   };
 }
 
@@ -789,7 +789,7 @@ export function DevicesPage() {
         action = dialpadMappingsRef.current[event.button_code];
       }
       
-      if (action && action.keyCombo && action.config?.allowHold) {
+      if (action && action.keyCombo && (action.config?.allowHold || action.config?.keyComboMode === "hold")) {
         if (actionsReadyRef.current) {
           executeAction(action, false); // false = release
         }
@@ -847,13 +847,13 @@ export function DevicesPage() {
     if (action.keyCombo || action.id.startsWith("custom-keybind-") || action.config?.keyCombo) {
       if (action.config?.keyCombo && (action.keyCombo === "custom-keybind" || action.id.startsWith("custom-keybind-") || action.category === "KEYBOARD")) {
         // Execute the custom keybind from config
-        const allowHold = action.config.allowHold ?? false;
+        const holdKeybind = action.config.keyComboMode === "hold" || action.config.allowHold === true;
         try {
           console.log("Executing keybind macro:", action.name, action.config.keyCombo);
           await invoke("execute_key_combo", { 
             combo: action.config.keyCombo,
             mode: action.config.keyComboMode,
-            hold: allowHold,
+            hold: holdKeybind,
             press: isPress
           });
         } catch (err) {

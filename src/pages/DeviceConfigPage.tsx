@@ -38,7 +38,7 @@ interface Action {
     allowHold?: boolean;
     customCommand?: string;
     iconPath?: string;
-    keyComboMode?: "chord" | "sequence";
+  keyComboMode?: "chord" | "sequence" | "hold";
   };
 }
 
@@ -119,8 +119,9 @@ export function DeviceConfigPage({ deviceType, onBack }: DeviceConfigPageProps) 
   const [showKeybindCreator, setShowKeybindCreator] = useState(false);
   const [keybindNameDraft, setKeybindNameDraft] = useState("");
   const [keybindComboDraft, setKeybindComboDraft] = useState("");
+  const [editingKeybindId, setEditingKeybindId] = useState<string | null>(null);
   const [isRecordingKeybind, setIsRecordingKeybind] = useState(false);
-  const [keybindMode, setKeybindMode] = useState<"chord" | "sequence">("chord");
+  const [keybindMode, setKeybindMode] = useState<"chord" | "sequence" | "hold">("chord");
   const [installedApplications, setInstalledApplications] = useState<InstalledApplication[]>([]);
   const [selectedApplication, setSelectedApplication] = useState<InstalledApplication | null>(null);
   const [selectedLaunchCommand, setSelectedLaunchCommand] = useState<string | null>(null);
@@ -163,6 +164,7 @@ export function DeviceConfigPage({ deviceType, onBack }: DeviceConfigPageProps) 
         Control: "ctrl", Shift: "shift", Alt: "alt", Meta: "super",
         " ": "space", Escape: "esc", ArrowUp: "up", ArrowDown: "down",
         ArrowLeft: "left", ArrowRight: "right",
+        ContextMenu: "menu", Apps: "menu", Menu: "menu",
       };
       const key = normalizedKey[event.key] || (event.key.length === 1 ? event.key.toLowerCase() : event.key.toLowerCase());
       const keys = new Set(keybindComboDraft ? keybindComboDraft.split("+") : []);
@@ -196,18 +198,36 @@ export function DeviceConfigPage({ deviceType, onBack }: DeviceConfigPageProps) 
 
   const createCustomKeybind = () => {
     if (!keybindNameDraft.trim() || !keybindComboDraft.trim()) return;
-    saveCustomKeybinds([...customKeybinds, {
-      id: `custom-keybind-${Date.now()}`,
+    const updatedKeybind: Action = {
+      id: editingKeybindId ?? `custom-keybind-${Date.now()}`,
       name: keybindNameDraft.trim(),
       description: "Replay recorded keyboard macro",
       category: "KEYBOARD",
       icon: "KEY",
       keyCombo: "custom-keybind",
       config: { keyCombo: keybindComboDraft.trim(), keyComboMode: keybindMode },
-    }]);
+    };
+    if (editingKeybindId) {
+      saveCustomKeybinds(customKeybinds.map(keybind => keybind.id === editingKeybindId ? updatedKeybind : keybind));
+      setButtonMappings(prev => Object.fromEntries(
+        Object.entries(prev).map(([key, value]) => [key, value?.id === editingKeybindId ? updatedKeybind : value])
+      ));
+    } else {
+      saveCustomKeybinds([...customKeybinds, updatedKeybind]);
+    }
     setShowKeybindCreator(false);
+    setEditingKeybindId(null);
     setKeybindNameDraft("");
     setKeybindComboDraft("");
+  };
+
+  const editCustomKeybind = (action: Action) => {
+    setEditingKeybindId(action.id);
+    setKeybindNameDraft(action.name);
+    setKeybindComboDraft(action.config?.keyCombo ?? "");
+    setKeybindMode(action.config?.keyComboMode ?? (action.config?.allowHold ? "hold" : "chord"));
+    setIsRecordingKeybind(false);
+    setShowKeybindCreator(true);
   };
 
   const deleteCustomKeybind = (action: Action) => {
@@ -1317,7 +1337,7 @@ export function DeviceConfigPage({ deviceType, onBack }: DeviceConfigPageProps) 
                 {expandedSection === section && (
                   <div className="flex flex-col gap-1 ml-6">
                     {section === "KEYBOARD" && (
-                      <button onClick={() => { setKeybindNameDraft(""); setKeybindComboDraft(""); setShowKeybindCreator(true); }} className="mb-2 w-full rounded-md border border-dashed border-cyan-400/40 px-2.5 py-2 text-left text-xs font-bold text-cyan-400 hover:bg-cyan-400/10">
+                      <button onClick={() => { setEditingKeybindId(null); setKeybindNameDraft(""); setKeybindComboDraft(""); setKeybindMode("chord"); setShowKeybindCreator(true); }} className="mb-2 w-full rounded-md border border-dashed border-cyan-400/40 px-2.5 py-2 text-left text-xs font-bold text-cyan-400 hover:bg-cyan-400/10">
                         + Add Custom Keybind
                       </button>
                     )}
@@ -1411,12 +1431,22 @@ export function DeviceConfigPage({ deviceType, onBack }: DeviceConfigPageProps) 
                             </div>
                           )}
                           {(action.id.startsWith("custom-command-") || action.id.startsWith("custom-keybind-")) && (
+                            <div className="mt-2 flex gap-3 text-[10px]">
+                            {action.id.startsWith("custom-keybind-") && (
+                              <button
+                                onClick={(event) => { event.stopPropagation(); editCustomKeybind(action); }}
+                                className="text-cyan-400 hover:text-cyan-300"
+                              >
+                                Edit keybind
+                              </button>
+                            )}
                             <button
                               onClick={(event) => { event.stopPropagation(); action.id.startsWith("custom-keybind-") ? deleteCustomKeybind(action) : deleteCustomCommand(action); }}
-                              className="mt-2 text-[10px] text-red-400 hover:text-red-300"
+                              className="text-red-400 hover:text-red-300"
                             >
                               {action.id.startsWith("custom-keybind-") ? "Delete keybind" : "Delete command"}
                             </button>
+                            </div>
                           )}
                         </button>
                       </div>
@@ -1664,9 +1694,10 @@ export function DeviceConfigPage({ deviceType, onBack }: DeviceConfigPageProps) 
             {keybindComboDraft || (isRecordingKeybind ? 'Press keys, then press Enter' : 'No keys recorded')}
           </div>
           <label className="block text-xs text-gray-400 mt-4 mb-2">Playback mode</label>
-          <select value={keybindMode} onChange={event => setKeybindMode(event.target.value as "chord" | "sequence")} className="w-full bg-[#111827] border border-cyan-400/40 rounded px-3 py-2 text-gray-100 text-sm focus:border-cyan-400 focus:outline-none" style={{ colorScheme: "dark" }}>
+          <select value={keybindMode} onChange={event => setKeybindMode(event.target.value as "chord" | "sequence" | "hold")} className="w-full bg-[#111827] border border-cyan-400/40 rounded px-3 py-2 text-gray-100 text-sm focus:border-cyan-400 focus:outline-none" style={{ colorScheme: "dark" }}>
             <option value="chord" className="bg-[#111827] text-gray-100">Press all keys together</option>
             <option value="sequence" className="bg-[#111827] text-gray-100">Press keys in order</option>
+            <option value="hold" className="bg-[#111827] text-gray-100">Hold while macro button is pressed</option>
           </select>
           <div className="flex gap-2 mt-3">
             <button onClick={() => { setKeybindComboDraft(""); setIsRecordingKeybind(true); }} className="flex-1 px-3 py-2 bg-cyan-400/20 text-cyan-300 rounded">{isRecordingKeybind ? 'Recording…' : 'Record Macro'}</button>

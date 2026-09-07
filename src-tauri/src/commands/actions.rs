@@ -165,6 +165,7 @@ fn get_key_code(key: &str) -> Result<&'static str, String> {
         "arrowdown" | "down" => Ok("108"),
         "arrowleft" | "left" => Ok("105"),
         "arrowright" | "right" => Ok("106"),
+        "menu" | "contextmenu" | "apps" => Ok("139"),
         "f1" => Ok("59"),
         "f2" => Ok("60"),
         "f3" => Ok("61"),
